@@ -45,6 +45,7 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
         setOtherServicesFail()  // 使其他定位服务失效
         hookGnssStatus()
         hookLocationUpdate()
+        hookGmsLocationMethods()
         setLastLocation()
         removeNmeaListener()
         hookGpsStatus()
@@ -278,6 +279,26 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
 
     private fun removeNmeaListener() {
         LocationManager::class.java.setAllMethodResult("addNmeaListener", false)
+    }
+
+    private fun hookGmsLocationMethods() {
+        // Log.i("Xposed.location", "hookGmsLocationMethods")
+        // try {
+        //     FusedLocationProviderClient::class.java.run {
+        //         declaredMethods.filter {
+        //             (it.name == "getLastLocation" || it.name == "getLastKnownLocation") && it.returnType == Location::class.java
+        //         }.forEach { method ->
+        //             Log.i("Xposed.location", "hook ${method.name}")
+        //             afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
+        //                 Log.i("Xposed.location", "afterHookedMethod ${method.name}")
+        //                 val location = hookParam.result as Location
+        //                 hookParam.result = modifyLocation(location)
+        //             }
+        //         }
+        //     }
+        // } catch (e: Exception) {
+        //     Log.i("Xposed.location", "hook err: ${e.message}")
+        // }
     }
 
     private fun modifyLocation(location: Location): Location {
