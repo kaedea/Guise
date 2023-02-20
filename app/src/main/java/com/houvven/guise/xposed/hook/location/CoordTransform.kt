@@ -1,6 +1,8 @@
 package com.houvven.guise.xposed.hook.location
 
 /**
+ * Copycat of [JZLocationConverter-for-Android](https://github.com/taoweiji/JZLocationConverter-for-Android)
+ *
  * @author Kaede
  * @since  18/2/2023
  */
