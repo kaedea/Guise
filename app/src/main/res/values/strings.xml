@@ -53,6 +53,7 @@
     <string name="location_lng">Longitude</string>
     <string name="location_lat">Latitude</string>
     <string name="location_offset">Random offset</string>
+    <string name="location_fix_gogle_map_drift">Fix Google Map Drift</string>
     <string name="location_wifi_fail">Invalidate WiFi location</string>
 
     <string name="build_config_version_name">Version Name</string>

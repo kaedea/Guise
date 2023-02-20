@@ -34,6 +34,7 @@ class ModuleConfigState private constructor(moduleConfig: ModuleConfig) {
     lateinit var longitude: MutableState<String>
     lateinit var latitude: MutableState<String>
     lateinit var randomOffset: MutableState<Boolean>
+    lateinit var fixGoogleMapDrift: MutableState<Boolean>
     lateinit var makeWifiLocationFail: MutableState<Boolean>
     lateinit var makeCellLocationFail: MutableState<Boolean>
 
