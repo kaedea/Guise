@@ -9,14 +9,14 @@ import android.os.SystemClock
 import android.util.Log
 import com.houvven.guise.xposed.LoadPackageHandler
 import com.houvven.ktx_xposed.hook.*
-import de.robv.android.xposed.XposedBridge
 
 
 @Suppress("DEPRECATION")
 class LocationHook : LoadPackageHandler, LocationHookBase() {
 
-    private var latitude = config.latitude
-    private var longitude = config.longitude
+    private var fakeLatitude = config.latitude
+    private var fakeLongitude = config.longitude
+    private var lastGcj02LatLng: CoordTransform.LatLng? = null
 
     private val svCount = 5
     private val svidWithFlags = intArrayOf(1, 2, 3, 4, 5)
@@ -26,65 +26,98 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
     private val carrierFrequencies = cn0s.clone()
     private val basebandCn0DbHzs = cn0s.clone()
 
+    private val isFakeLocationMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { config.latitude != -1.0 && config.longitude != -1.0 && !isFixGoogleMapDriftMode }
+    private val isFixGoogleMapDriftMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { config.fixGoogleMapDrift }
 
     override fun onHook() {
-        Log.i("Xposed.location", "onHook: latitude=$latitude, longitude=$longitude, fixGoogleMapDrift=${config.fixGoogleMapDrift}")
-        if (longitude == -1.0 && latitude == -1.0 && !config.fixGoogleMapDrift) return
+        Log.i("Xposed.location", "onHook config: latitude=${config.latitude}, longitude=${config.longitude}, fixGoogleMapDrift=${config.fixGoogleMapDrift}")
+        if (!isFakeLocationMode && !isFixGoogleMapDriftMode) {
+            // LocationHook Disabled
+            return
+        }
 
         // LocationHook Enabled
         if (config.randomOffset) {
-            latitude += (Math.random() - 0.5) * 0.0001
-            longitude += (Math.random() - 0.5) * 0.0001
+            fakeLatitude += (Math.random() - 0.5) * 0.0001
+            fakeLongitude += (Math.random() - 0.5) * 0.0001
         }
         if (config.makeWifiLocationFail) makeWifiLocationFail()
         if (config.makeCellLocationFail) makeCellLocationFail()
 
         fakeLatlng()
-        setOtherServicesFail()  // 使其他定位服务失效
-        hookGnssStatus()
-        hookLocationUpdate()
         setLastLocation()
-        removeNmeaListener()
-        hookGpsStatus()
-        hookGpsStatusListener()
+        hookLocationUpdate()
+
+        if (isFakeLocationMode) {
+            setOtherServicesFail()  // 使其他定位服务失效
+            hookGnssStatus()
+            removeNmeaListener()
+            hookGpsStatus()
+            hookGpsStatusListener()
+        }
+        if (isFixGoogleMapDriftMode) {
+        }
     }
 
     private fun fakeLatlng() {
-        Log.i("Xposed.location", "fixGoogleMapDrift: ${config.fixGoogleMapDrift}")
-        if (config.fixGoogleMapDrift) {
+        Log.i("Xposed.location", "fakeLatlng")
+        if (isFakeLocationMode) {
+            Location::class.java.run {
+                setMethodResult("getLongitude", fakeLongitude)
+                setMethodResult("getLatitude", fakeLatitude)
+            }
+
+        } else if (isFixGoogleMapDriftMode) {
             Location::class.java.run {
                 declaredMethods.filter {
-                    (it.name == "getLongitude" || it.name == "getLatitude") && it.returnType == Double::class.java
+                    (it.name == "getLatitude" || it.name == "getLongitude") && it.returnType == Double::class.java
                 }.forEach { method ->
                     Log.i("Xposed.location", "hook ${method.name}")
                     afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
-                        Log.i("Xposed.location", "afterHookedMethod ${method.name}")
-                        val location = hookParam.thisObject as Location
-                        val isFake = isFakeLocation(location)
-                        Log.i("Xposed.location", "isFake $isFake")
-                        if (isFake) {
-                            return@afterHookedMethod
-                        }
-                        wgs84ToGcj02(location)?.let {
-                            when(method.name) {
-                                "getLongitude" -> hookParam.result = it.longitude
-                                "getLatitude" -> hookParam.result = it.latitude
+                        (hookParam.thisObject as? Location)?.let { location ->
+                            Log.i("Xposed.location", "afterHookedMethod $location")
+                            val isGcj02 = isGcj02Location(location)
+                            val isTransformable = isTransformable(location)
+                            Log.i("Xposed.location", "isGcj02=$isGcj02, isTransformable=$isTransformable")
+
+                            val old = hookParam.result
+                            if (!isGcj02) {
+                                if (isTransformable) {
+                                    wgs84ToGcj02(location)?.let {
+                                        when (method.name) {
+                                            "getLatitude" -> hookParam.result = it.latitude
+                                            "getLongitude" -> hookParam.result = it.longitude
+                                        }
+                                    }
+                                } else {
+                                    Log.i("Xposed.location", "extras ${location.extras}")
+                                    // Get the last gcj-02 location
+                                    lastGcj02LatLng?.let {
+                                        when (method.name) {
+                                            "getLatitude" -> hookParam.result = it.latitude
+                                            "getLongitude" -> hookParam.result = it.longitude
+                                        }
+                                    }
+                                }
                             }
+                            Log.i("Xposed.location", "${method.name}: $old >> ${hookParam.result}")
                         }
                     }
                 }
-            }
-        } else {
-            Location::class.java.run {
-                setMethodResult("getLongitude", longitude)
-                setMethodResult("getLatitude", latitude)
             }
         }
     }
 
     private fun setLastLocation() {
         Log.i("Xposed.location", "setLastLocation")
-        if (config.fixGoogleMapDrift) {
+        if (isFakeLocationMode) {
+            LocationManager::class.java.setSomeSameNameMethodResult(
+                "getLastLocation",
+                "getLastKnownLocation",
+                value = modifyLocationToFake(Location(LocationManager.GPS_PROVIDER))
+            )
+
+        } else if (isFixGoogleMapDriftMode) {
             LocationManager::class.java.run {
                 declaredMethods.filter {
                     (it.name == "getLastLocation" || it.name == "getLastKnownLocation") && it.returnType == Location::class.java
@@ -92,17 +125,12 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                     Log.i("Xposed.location", "hook ${method.name}")
                     afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
                         Log.i("Xposed.location", "afterHookedMethod ${method.name}")
-                        val location = hookParam.result as Location
-                        hookParam.result = modifyLocation(location)
+                        (hookParam.result as? Location)?.let {
+                            hookParam.result = modifyLocationToGcj02(it)
+                        }
                     }
                 }
             }
-        } else {
-            LocationManager::class.java.setSomeSameNameMethodResult(
-                "getLastLocation",
-                "getLastKnownLocation",
-                value = modifyLocation(Location(LocationManager.GPS_PROVIDER))
-            )
         }
     }
 
@@ -193,69 +221,9 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
         Log.i("Xposed.location", "hookLocationUpdate")
         val requestLocationUpdates = "requestLocationUpdates"
         val requestSingleUpdate = "requestSingleUpdate"
+        val getCurrentLocation = "getCurrentLocation"
 
-        if (config.fixGoogleMapDrift) {
-            LocationManager::class.java.run {
-                var target: String
-                for (method in declaredMethods) {
-                    if (method.name != requestLocationUpdates && method.name != requestSingleUpdate) continue
-                    val indexOf = method.parameterTypes.indexOf(LocationListener::class.java)
-                    if (indexOf == -1) continue
-                    val paramsTypes = method.parameterTypes
-                    target = method.name
-                    Log.i("Xposed.location", "hook: $target")
-                    beforeHookedMethod(target, *paramsTypes) {
-                        Log.i("Xposed.location", "beforeHookedMethod $target, idx=$indexOf")
-                        val listener = it.args[indexOf] as LocationListener
-                        val wrapper: LocationListener = object : LocationListener {
-                            override fun onLocationChanged(location: Location) {
-                                Log.i("Xposed.location", "onLocationChanged")
-                                listener.onLocationChanged(modifyLocation(location))
-                            }
-
-                            override fun onLocationChanged(locations: List<Location>) {
-                                Log.i("Xposed.location", "onLocationChanged list: ${locations.size}")
-                                val fakeLocations = arrayListOf<Location>()
-                                for (location in locations) {
-                                    fakeLocations.add(modifyLocation(location))
-                                }
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                    listener.onLocationChanged(fakeLocations)
-                                }
-                            }
-
-                            override fun onFlushComplete(requestCode: Int) {
-                                Log.i("Xposed.location", "onFlushComplete")
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                    listener.onFlushComplete(requestCode)
-                                }
-                            }
-
-                            override fun onStatusChanged(
-                                provider: String,
-                                status: Int,
-                                extras: Bundle
-                            ) {
-                                Log.i("Xposed.location", "onStatusChanged provider")
-                                listener.onStatusChanged(provider, status, extras)
-                            }
-
-                            override fun onProviderEnabled(provider: String) {
-                                Log.i("Xposed.location", "onProviderEnabled")
-                                listener.onProviderEnabled(provider)
-                            }
-
-                            override fun onProviderDisabled(provider: String) {
-                                Log.i("Xposed.location", "onProviderDisabled")
-                                listener.onProviderDisabled(provider)
-                            }
-                        }
-                        it.args[indexOf] = wrapper
-                        XposedBridge.invokeOriginalMethod(method, it.thisObject, it.args)
-                    }
-                }
-            }
-        } else {
+        if (isFakeLocationMode) {
             LocationManager::class.java.run {
                 var target: String
                 for (method in declaredMethods) {
@@ -266,8 +234,75 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                     target = method.name
                     afterHookedMethod(target, *paramsTypes) {
                         val listener = it.args[indexOf] as LocationListener
-                        val location = modifyLocation(Location(LocationManager.GPS_PROVIDER))
+                        val location = modifyLocationToFake(Location(LocationManager.GPS_PROVIDER))
                         listener.onLocationChanged(location)
+                    }
+                }
+            }
+
+        } else if (isFixGoogleMapDriftMode) {
+            LocationManager::class.java.run {
+                for (method in declaredMethods) {
+                    if (method.name != requestLocationUpdates && method.name != requestSingleUpdate && method.name != getCurrentLocation) {
+                        continue
+                    }
+                    val target = method.name
+                    val paramsTypes = method.parameterTypes
+                    val indexOf = method.parameterTypes.indexOf(LocationListener::class.java)
+                    if (indexOf == -1) {
+                        // Just intercept invocation right now
+                        // Log.i("Xposed.location", "replace: $target($paramsTypes)")
+                        // replaceMethod(this, target, *paramsTypes) {
+                        //     Log.i("Xposed.location", "replaceMethod $target $paramsTypes")
+                        // }
+                        continue
+                    } else {
+                        // Hook and modify location
+                        Log.i("Xposed.location", "hook: $target")
+                        beforeHookedMethod(target, *paramsTypes) {
+                            Log.i("Xposed.location", "beforeHookedMethod $target, idx=$indexOf")
+                            val listener = it.args[indexOf] as LocationListener
+                            val wrapper: LocationListener = object : LocationListener {
+                                override fun onLocationChanged(location: Location) {
+                                    Log.i("Xposed.location", "onLocationChanged")
+                                    listener.onLocationChanged(modifyLocationToGcj02(location))
+                                }
+
+                                override fun onLocationChanged(locations: List<Location>) {
+                                    Log.i("Xposed.location", "onLocationChanged list: ${locations.size}")
+                                    val fakeLocations = arrayListOf<Location>()
+                                    for (location in locations) {
+                                        fakeLocations.add(modifyLocationToGcj02(location))
+                                    }
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                        listener.onLocationChanged(fakeLocations)
+                                    }
+                                }
+
+                                override fun onFlushComplete(requestCode: Int) {
+                                    Log.i("Xposed.location", "onFlushComplete")
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                        listener.onFlushComplete(requestCode)
+                                    }
+                                }
+
+                                override fun onStatusChanged(provider: String, status: Int, extras: Bundle) {
+                                    Log.i("Xposed.location", "onStatusChanged provider")
+                                    listener.onStatusChanged(provider, status, extras)
+                                }
+
+                                override fun onProviderEnabled(provider: String) {
+                                    Log.i("Xposed.location", "onProviderEnabled")
+                                    listener.onProviderEnabled(provider)
+                                }
+
+                                override fun onProviderDisabled(provider: String) {
+                                    Log.i("Xposed.location", "onProviderDisabled")
+                                    listener.onProviderDisabled(provider)
+                                }
+                            }
+                            it.args[indexOf] = wrapper
+                        }
                     }
                 }
             }
@@ -278,44 +313,111 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
         LocationManager::class.java.setAllMethodResult("addNmeaListener", false)
     }
 
-    private fun modifyLocation(location: Location): Location {
+    private fun modifyLocationToFake(location: Location): Location {
+        Log.i("Xposed.location", "modifyLocationToFake: $location")
+        if (!isFakeLocationMode) {
+            throw IllegalStateException("isFakeLocationMode=${isFakeLocationMode}")
+        }
         return location.also {
-            if (config.fixGoogleMapDrift) {
-                if (isFakeLocation(it)) {
-                    Log.i("Xposed.location", "isFakeLocation true")
-                    return@also
+            it.longitude = fakeLongitude
+            it.latitude = fakeLatitude
+            it.provider = LocationManager.GPS_PROVIDER
+            it.accuracy = 10.0f
+            it.time = System.currentTimeMillis()
+            it.elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+            it.extras = it.let bundle@{
+                val bundle = if (it.extras != null) it.extras else Bundle()
+                bundle!!.run {
+                    putBoolean("isFake", true)
                 }
-                Log.i("Xposed.location", "get real location: $it")
-                wgs84ToGcj02(it)?.let { newLocation ->
-                    it.latitude = newLocation.latitude
-                    it.longitude = newLocation.longitude
-                    it.time = System.currentTimeMillis()
-                    it.elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
-                    Log.i("Xposed.location", "set fake location: $it")
-                }
-            } else {
-                it.longitude = longitude
-                it.latitude = latitude
-                it.provider = LocationManager.GPS_PROVIDER
-                it.accuracy = 10.0f
-                it.time = System.currentTimeMillis()
-                it.elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+                return@bundle bundle
+            }
+        }
+    }
+
+    private fun modifyLocationToGcj02(location: Location): Location {
+        Log.i("Xposed.location", "modifyLocationToGcj02: $location")
+        if (!isFixGoogleMapDriftMode) {
+            throw IllegalStateException("isFixGoogleMapDriftMode=${isFixGoogleMapDriftMode}")
+        }
+        return location.also {
+            if (isGcj02Location(it)) {
+                return@also
+            }
+            if (!isTransformable(location)) {
+                Log.i("Xposed.location", "isTransformable: false")
+                return@also
+            }
+            wgs84ToGcj02(it)?.let { latLng ->
+                lastGcj02LatLng = latLng
+                // it.time = System.currentTimeMillis()
+                // it.elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
             }
         }
     }
 
     private fun wgs84ToGcj02(location: Location): CoordTransform.LatLng? {
-        if (!config.fixGoogleMapDrift || isFakeLocation(location)) {
-            throw IllegalStateException("fixGoogleMapDrift=${config.fixGoogleMapDrift}, isFakeLocation=${isFakeLocation(location)}")
+        Log.i("Xposed.location", "wgs84ToGcj02: $location")
+        if (!isFixGoogleMapDriftMode
+            || !isTransformable(location)
+            || isGcj02Location(location)) {
+            throw IllegalStateException("isFixGoogleMapDriftMode=${isFixGoogleMapDriftMode}" +
+                    ", isTransformable=${isTransformable(location)}" +
+                    ", isGcj02=${isGcj02Location(location)}")
         }
-        Log.i("Xposed.location", "wgs84ToGcj02")
-        location.extras = location.let bundle@{
-            val bundle = if (it.extras != null) it.extras else Bundle()
-            bundle!!.putBoolean("wgs2gcj", true)
-            return@bundle bundle
+        val inputLatLng = safeGetLatLng(location) ?: return null
+        return CoordTransform.wgs84ToGcj02(inputLatLng)?.also { outputLatLng ->
+            location.latitude = outputLatLng.latitude
+            location.longitude = outputLatLng.longitude
+            location.extras = location.let bundle@{
+                val bundle = if (it.extras != null) it.extras else Bundle()
+                bundle!!.run {
+                    putBoolean("wgs2gcj", true)
+                    putDouble("latWgs84" ,inputLatLng.latitude)
+                    putDouble("lngWgs84" ,inputLatLng.longitude)
+                    putDouble("latGcj02" ,outputLatLng.latitude)
+                    putDouble("lngGcj02" ,outputLatLng.longitude)
+                }
+                return@bundle bundle
+            }
+            Log.i("Xposed.location", "[${inputLatLng.latitude}, ${inputLatLng.longitude}] >> [${outputLatLng.latitude}, ${outputLatLng.longitude}]")
         }
-        return CoordTransform.wgs84ToGcj02(CoordTransform.LatLng(location.latitude, location.longitude))
     }
 
-    private fun isFakeLocation(it: Location) = it.extras != null && it.extras!!.getBoolean("wgs2gcj", false)
+    private fun isTransformable(location: Location): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && location.provider == LocationManager.FUSED_PROVIDER) {
+            return false
+        }
+        return true
+    }
+
+    /**
+     * Avoid recursive hooking
+     */
+    private fun safeGetLatLng(location: Location): CoordTransform.LatLng? {
+        val raw = location.toString()
+        val symBgn = "Location[${location.provider} "
+        val symEnd = " "
+        if (raw.startsWith(symBgn)) {
+            val prefix = raw.substring(raw.indexOf(symBgn) + symBgn.length)
+            if (prefix.contains(symEnd)) {
+                val target = prefix.substring(0, prefix.indexOf(symEnd))
+                val split = target.split(",")
+                if (split.size == 2) {
+                    return CoordTransform.LatLng(split[0].toDouble(), split[1].toDouble())
+                }
+            }
+        }
+        return null
+    }
+
+    private fun getLocationGcj02(location: Location): CoordTransform.LatLng? {
+        if (location.extras == null) return null
+        if (!location.extras!!.containsKey("latGcj02") || !location.extras!!.containsKey("lngGcj02")) return null
+        return CoordTransform.LatLng(location.extras!!.getDouble("latGcj02"), location.extras!!.getDouble("lngGcj02"))
+    }
+
+    private fun isGcj02Location(it: Location) = it.extras != null && it.extras!!.getBoolean("wgs2gcj", false)
+
+    private fun isFakeLocation(it: Location) = it.extras != null && it.extras!!.getBoolean("isFake", false)
 }
