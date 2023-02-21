@@ -1,12 +1,114 @@
 package com.houvven.guise.xposed.hook.location
 
+import android.location.Location
+import android.location.LocationManager
+import android.os.Build
+import android.os.Bundle
+import android.util.Log
+
+/**
+ * @author Kaede
+ * @since  21/2/2023
+ */
+
+internal fun Location.isFakeLocation() = extras != null && extras!!.getBoolean("isFake", false)
+internal fun Location.isGcj02Location() = extras != null && extras!!.getBoolean("wgs2gcj", false)
+
+internal fun Location.isTransformable(): Boolean {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && provider == LocationManager.FUSED_PROVIDER) {
+        return false
+    }
+    return true
+}
+
+internal fun Location.getLocationWgs84(): CoordTransform.LatLng? {
+    if (extras == null) return null
+    if (!extras!!.containsKey("latWgs84") || !extras!!.containsKey("lngWgs84")) return null
+    return CoordTransform.LatLng(extras!!.getDouble("latWgs84"), extras!!.getDouble("lngWgs84"))
+}
+
+internal fun Location.getLocationGcj02(): CoordTransform.LatLng? {
+    if (extras == null) return null
+    if (!extras!!.containsKey("latGcj02") || !extras!!.containsKey("lngGcj02")) return null
+    return CoordTransform.LatLng(extras!!.getDouble("latGcj02"), extras!!.getDouble("lngGcj02"))
+}
+
+internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
+    Log.i("Xposed.location", "wgs84ToGcj02: $this")
+    if (!isTransformable() || isGcj02Location()) {
+        throw IllegalStateException("isTransformable=${isTransformable()}" + ", isGcj02=${isGcj02Location()}")
+    }
+    val inputLatLng = safeGetLatLng() ?: return null
+    return CoordTransform.wgs84ToGcj02(inputLatLng)?.also { outputLatLng ->
+        latitude = outputLatLng.latitude
+        longitude = outputLatLng.longitude
+        extras = let bundle@{
+            val bundle = if (it.extras != null) it.extras else Bundle()
+            bundle!!.run {
+                putBoolean("wgs2gcj", true)
+                putDouble("latWgs84" ,inputLatLng.latitude)
+                putDouble("lngWgs84" ,inputLatLng.longitude)
+                putDouble("latGcj02" ,outputLatLng.latitude)
+                putDouble("lngGcj02" ,outputLatLng.longitude)
+            }
+            return@bundle bundle
+        }
+        Log.i("Xposed.location", "[${inputLatLng.latitude}, ${inputLatLng.longitude}] >> [${outputLatLng.latitude}, ${outputLatLng.longitude}]")
+    }
+}
+
+private val latitudeFiled by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy Location::class.java.getDeclaredField("mLatitudeDegrees").also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
+private val longitudeField by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy Location::class.java.getDeclaredField("mLongitudeDegrees").also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
+/**
+ * Avoid recursive hooking
+ */
+internal fun Location.safeGetLatLng(): CoordTransform.LatLng? {
+    run {
+        val lat = latitudeFiled?.get(this) as? Double
+        val lng = longitudeField?.get(this) as? Double
+        if (lat != null && lng != null) {
+            return CoordTransform.LatLng(lat, lng)
+        }
+    }
+    val raw = toString()
+    val symBgn = "Location[${provider} "
+    val symEnd = " "
+    if (raw.startsWith(symBgn)) {
+        val prefix = raw.substring(raw.indexOf(symBgn) + symBgn.length)
+        if (prefix.contains(symEnd)) {
+            val target = prefix.substring(0, prefix.indexOf(symEnd))
+            val split = target.split(",")
+            if (split.size == 2) {
+                return CoordTransform.LatLng(split[0].toDouble(), split[1].toDouble())
+            }
+        }
+    }
+    return null
+}
+
+
 /**
  * Copycat of [JZLocationConverter-for-Android](https://github.com/taoweiji/JZLocationConverter-for-Android)
- *
- * @author Kaede
- * @since  18/2/2023
  */
-object CoordTransform {
+internal object CoordTransform {
     private fun LAT_OFFSET_0(x: Double, y: Double): Double {
         return -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x))
     }
@@ -198,3 +300,4 @@ object CoordTransform {
         constructor() {}
     }
 }
+

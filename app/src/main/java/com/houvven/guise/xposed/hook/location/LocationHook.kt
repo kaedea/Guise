@@ -76,14 +76,11 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                     afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
                         (hookParam.thisObject as? Location)?.let { location ->
                             Log.i("Xposed.location", "afterHookedMethod $location")
-                            val isGcj02 = isGcj02Location(location)
-                            val isTransformable = isTransformable(location)
-                            Log.i("Xposed.location", "isGcj02=$isGcj02, isTransformable=$isTransformable")
-
+                            Log.i("Xposed.location", "isGcj02=${location.isGcj02Location()}, isTransformable=${location.isTransformable()}")
                             val old = hookParam.result
-                            if (!isGcj02) {
-                                if (isTransformable) {
-                                    wgs84ToGcj02(location)?.let {
+                            if (!location.isGcj02Location()) {
+                                if (location.isTransformable()) {
+                                    location.wgs84ToGcj02()?.let {
                                         when (method.name) {
                                             "getLatitude" -> hookParam.result = it.latitude
                                             "getLongitude" -> hookParam.result = it.longitude
@@ -100,7 +97,7 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                                     }
                                 }
                             }
-                            Log.i("Xposed.location", "${method.name}: $old >> ${hookParam.result}")
+                            Log.i("Xposed.location", "${method.name}: $old ${if (old == hookParam.result) "==" else ">>"} ${hookParam.result}")
                         }
                     }
                 }
@@ -124,8 +121,8 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                 }.forEach { method ->
                     Log.i("Xposed.location", "hook ${method.name}")
                     afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
-                        Log.i("Xposed.location", "afterHookedMethod ${method.name}")
                         (hookParam.result as? Location)?.let {
+                            Log.i("Xposed.location", "afterHookedMethod ${method.name}")
                             hookParam.result = modifyLocationToGcj02(it)
                         }
                     }
@@ -341,83 +338,19 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
             throw IllegalStateException("isFixGoogleMapDriftMode=${isFixGoogleMapDriftMode}")
         }
         return location.also {
-            if (isGcj02Location(it)) {
+            if (it.isGcj02Location()) {
                 return@also
             }
-            if (!isTransformable(location)) {
-                Log.i("Xposed.location", "isTransformable: false")
+            if (!location.isTransformable()) {
+                Log.i("Xposed.location", "isTransformable: ${location.isTransformable()}")
                 return@also
             }
-            wgs84ToGcj02(it)?.let { latLng ->
+            it.wgs84ToGcj02()?.let { latLng ->
                 lastGcj02LatLng = latLng
                 // it.time = System.currentTimeMillis()
                 // it.elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
             }
         }
     }
-
-    private fun wgs84ToGcj02(location: Location): CoordTransform.LatLng? {
-        Log.i("Xposed.location", "wgs84ToGcj02: $location")
-        if (!isFixGoogleMapDriftMode
-            || !isTransformable(location)
-            || isGcj02Location(location)) {
-            throw IllegalStateException("isFixGoogleMapDriftMode=${isFixGoogleMapDriftMode}" +
-                    ", isTransformable=${isTransformable(location)}" +
-                    ", isGcj02=${isGcj02Location(location)}")
-        }
-        val inputLatLng = safeGetLatLng(location) ?: return null
-        return CoordTransform.wgs84ToGcj02(inputLatLng)?.also { outputLatLng ->
-            location.latitude = outputLatLng.latitude
-            location.longitude = outputLatLng.longitude
-            location.extras = location.let bundle@{
-                val bundle = if (it.extras != null) it.extras else Bundle()
-                bundle!!.run {
-                    putBoolean("wgs2gcj", true)
-                    putDouble("latWgs84" ,inputLatLng.latitude)
-                    putDouble("lngWgs84" ,inputLatLng.longitude)
-                    putDouble("latGcj02" ,outputLatLng.latitude)
-                    putDouble("lngGcj02" ,outputLatLng.longitude)
-                }
-                return@bundle bundle
-            }
-            Log.i("Xposed.location", "[${inputLatLng.latitude}, ${inputLatLng.longitude}] >> [${outputLatLng.latitude}, ${outputLatLng.longitude}]")
-        }
-    }
-
-    private fun isTransformable(location: Location): Boolean {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && location.provider == LocationManager.FUSED_PROVIDER) {
-            return false
-        }
-        return true
-    }
-
-    /**
-     * Avoid recursive hooking
-     */
-    private fun safeGetLatLng(location: Location): CoordTransform.LatLng? {
-        val raw = location.toString()
-        val symBgn = "Location[${location.provider} "
-        val symEnd = " "
-        if (raw.startsWith(symBgn)) {
-            val prefix = raw.substring(raw.indexOf(symBgn) + symBgn.length)
-            if (prefix.contains(symEnd)) {
-                val target = prefix.substring(0, prefix.indexOf(symEnd))
-                val split = target.split(",")
-                if (split.size == 2) {
-                    return CoordTransform.LatLng(split[0].toDouble(), split[1].toDouble())
-                }
-            }
-        }
-        return null
-    }
-
-    private fun getLocationGcj02(location: Location): CoordTransform.LatLng? {
-        if (location.extras == null) return null
-        if (!location.extras!!.containsKey("latGcj02") || !location.extras!!.containsKey("lngGcj02")) return null
-        return CoordTransform.LatLng(location.extras!!.getDouble("latGcj02"), location.extras!!.getDouble("lngGcj02"))
-    }
-
-    private fun isGcj02Location(it: Location) = it.extras != null && it.extras!!.getBoolean("wgs2gcj", false)
-
-    private fun isFakeLocation(it: Location) = it.extras != null && it.extras!!.getBoolean("isFake", false)
 }
+
