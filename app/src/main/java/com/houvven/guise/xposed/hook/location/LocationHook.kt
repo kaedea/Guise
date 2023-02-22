@@ -97,8 +97,7 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                                         }
                                         // Get the last gcj-02 location
                                         lastGcj02LatLng?.let {
-                                            location.latitude = it.latitude
-                                            location.longitude = it.longitude
+                                            location.safeSetLatLng(it)
                                             when (method.name) {
                                                 "getLatitude" -> hookParam.result = it.latitude
                                                 "getLongitude" -> hookParam.result = it.longitude
@@ -326,19 +325,18 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
             throw IllegalStateException("isFakeLocationMode=${isFakeLocationMode}")
         }
         return location.also {
-            it.longitude = fakeLongitude
-            it.latitude = fakeLatitude
+            it.safeSetLatLng(CoordTransform.LatLng(fakeLatitude, fakeLongitude))
             it.provider = LocationManager.GPS_PROVIDER
             it.accuracy = 10.0f
             it.time = System.currentTimeMillis()
             it.elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
-            it.extras = it.let bundle@{
+            it.safeSetExtras(it.let bundle@{
                 val bundle = if (it.extras != null) it.extras else Bundle()
                 bundle!!.run {
                     putBoolean("isFake", true)
                 }
                 return@bundle bundle
-            }
+            })
         }
     }
 

@@ -48,13 +48,13 @@ internal fun Location.isFixUps(): Boolean {
             return extras!!.getBoolean("isFixUps", false)
         }
         return toString().contains("fixups=true").also { isFixUps ->
-            extras = let bundle@{
+            safeSetExtras(let bundle@{
                 val bundle = if (it.extras != null) it.extras else Bundle()
                 bundle!!.run {
                     putBoolean("isFixUps", isFixUps)
                 }
                 return@bundle bundle
-            }
+            })
         }
     }
     return false
@@ -80,9 +80,8 @@ internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
         }
         val inputLatLng = safeGetLatLng() ?: return null
         return CoordTransform.wgs84ToGcj02(inputLatLng)?.also { outputLatLng ->
-            latitude = outputLatLng.latitude
-            longitude = outputLatLng.longitude
-            extras = let bundle@{
+            safeSetLatLng(outputLatLng)
+            safeSetExtras(let bundle@{
                 val bundle = if (it.extras != null) it.extras else Bundle()
                 bundle!!.run {
                     putBoolean("wgs2gcj", true)
@@ -92,7 +91,7 @@ internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
                     putDouble("lngGcj02" ,outputLatLng.longitude)
                 }
                 return@bundle bundle
-            }
+            })
             log("[${inputLatLng.latitude}, ${inputLatLng.longitude}] >> [${outputLatLng.latitude}, ${outputLatLng.longitude}]")
         }
     }
@@ -111,6 +110,16 @@ private val latitudeFiled by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
 private val longitudeField by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     try {
         return@lazy Location::class.java.getDeclaredField("mLongitudeDegrees").also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
+private val extrasField by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy Location::class.java.getDeclaredField("mExtras").also {
             it.isAccessible = true
         }
     } catch (e: Exception) {
@@ -143,6 +152,29 @@ internal fun Location.safeGetLatLng(): CoordTransform.LatLng? {
         }
     }
     return null
+}
+
+internal fun Location.safeSetLatLng(latLng: CoordTransform.LatLng) {
+    if (javaClass == Location::class.java) {
+        latitude = latLng.latitude
+        longitude = latLng.longitude
+        return
+    }
+    latitudeFiled?.set(this, latLng.latitude)
+    longitudeField?.set(this, latLng.longitude)
+}
+
+internal fun Location.safeSetExtras(extras: Bundle) {
+    try {
+        if (this.extras == null) {
+            this.extras = extras
+        } else {
+            this.extras!!.putAll(extras)
+        }
+    } catch (e: Throwable) {
+        log("setExtras err: ${e.message}")
+        extrasField?.set(this, extras)
+    }
 }
 
 
