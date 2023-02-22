@@ -74,38 +74,54 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                     log("hook ${method.name}")
                     afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
                         (hookParam.thisObject as? Location)?.let { location ->
-                            log("afterHookedMethod $location", location.isReliableFused())
-                            log("isGcj02=${location.isGcj02Location()}, isTransformable=${location.isTransformable()}")
+                            log("onMethodInvoke ${method.name}@${location.hashCode()}:", location.isReliableFused())
+                            log("   from:")
+                            run {
+                                Throwable().stackTrace.forEach { log("       $it") }
+                            }
+                            log("   $location")
+                            log("   isGcj02=${location.isGcj02Location()}, isTransformable=${location.isTransformable()}")
                             // if (location::class.java != Location::class.java) {
                             //     log("methods=${location::class.java.declaredMethods.toList()}")
                             // }
                             synchronized(location) {
+                                var mode = ""
+                                val lastLatLng = lastGcj02LatLng
                                 val old = hookParam.result
                                 if (!location.isGcj02Location()) {
                                     if (location.isTransformable()) {
+                                        mode = "transform"
                                         location.wgs84ToGcj02()?.let {
-                                            when (method.name) {
-                                                "getLatitude" -> hookParam.result = it.latitude
-                                                "getLongitude" -> hookParam.result = it.longitude
-                                            }
-                                        }
-                                    } else {
-                                        log("extras ${location.extras}")
-                                        log("isReliableFused=${location.isReliableFused()}, isFixUps=${location.isFixUps()}")
-                                        if (location.isReliableFused() && !location.isFixUps()) {
-                                            lastGcj02LatLng = location.safeGetLatLng()
-                                        }
-                                        // Get the last gcj-02 location
-                                        lastGcj02LatLng?.let {
                                             location.safeSetLatLng(it)
                                             when (method.name) {
                                                 "getLatitude" -> hookParam.result = it.latitude
                                                 "getLongitude" -> hookParam.result = it.longitude
                                             }
                                         }
+                                    } else {
+                                        // log("extras ${location.extras}")
+                                        log("   isReliableFused=${location.isReliableFused()}, isFixUps=${location.isFixUps()}")
+                                        if (location.isReliableFused() && !location.isFixUps()) {
+                                            mode = "fused"
+                                            // location.safeGetLatLng()?.let { updateLastLatLng(it) }
+                                        } else {
+                                            mode = "cache"
+                                            // Get the last gcj-02 location
+                                            lastGcj02LatLng?.let {
+                                                // location.safeSetLatLng(it)
+                                                when (method.name) {
+                                                    "getLatitude" -> hookParam.result = it.latitude
+                                                    "getLongitude" -> hookParam.result = it.longitude
+                                                }
+                                            }
+                                        }
                                     }
+                                } else {
+                                    mode = "gcj-02"
                                 }
-                                log("${method.name}: $old ${if (old == hookParam.result) "==" else ">>"} ${hookParam.result}")
+                                log("   mode: $mode")
+                                log("   last: [${lastLatLng?.latitude}, ${lastLatLng?.longitude}]")
+                                log("   ${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
                             }
                         }
                     }
@@ -131,7 +147,7 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                     log("hook ${method.name}")
                     afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
                         (hookParam.result as? Location)?.let {
-                            log("afterHookedMethod ${method.name}")
+                            log("onMethodInvoke ${method.name}")
                             hookParam.result = modifyLocationToGcj02(it, true)
                         }
                     }
@@ -340,27 +356,41 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
         }
     }
 
+    @Suppress("SameParameterValue")
     private fun modifyLocationToGcj02(location: Location, keepAsLastLatLng: Boolean = true): Location {
         log("modifyLocationToGcj02: $location")
         if (!isFixGoogleMapDriftMode) {
             throw IllegalStateException("isFixGoogleMapDriftMode=${isFixGoogleMapDriftMode}")
         }
-        return location.also {
+        return Location(location).also {
             if (it.isGcj02Location()) {
+                log("   isGcj02Location: true")
                 return@also
             }
             if (!location.isTransformable()) {
-                log("isTransformable: ${location.isTransformable()}")
+                log("   isTransformable: false")
                 return@also
             }
             it.wgs84ToGcj02()?.let { latLng ->
                 if (keepAsLastLatLng) {
-                    lastGcj02LatLng = latLng
+                    updateLastLatLng(latLng)
                 }
-                // it.time = System.currentTimeMillis()
-                // it.elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+                it.time = System.currentTimeMillis()
+                it.elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
             }
         }
+    }
+
+    private fun updateLastLatLng(latLng: CoordTransform.LatLng) {
+        lastGcj02LatLng?.let { start ->
+            val floats = floatArrayOf(-1f)
+            Location.distanceBetween(start.latitude, start.longitude, latLng.latitude, latLng.longitude, floats)
+            if (floats[0] > 10f) {
+                logw("DRIFTING!! ${floats[0]}")
+            }
+        }
+        lastGcj02LatLng = latLng
+        logw("updateLastLatLng: [${lastGcj02LatLng?.latitude}, ${lastGcj02LatLng?.longitude}] >> [${latLng.latitude},${latLng.longitude}]")
     }
 }
 

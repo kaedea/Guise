@@ -14,6 +14,12 @@ import com.houvven.ktx_xposed.logger.XposedLogger
 internal inline fun log(text: String, logToXposed: Boolean = false) {
     Log.i("Xposed.location", text)
     if (logToXposed) {
+        XposedLogger.i(text)
+    }
+}
+internal inline fun logw(text: String, logToXposed: Boolean = true) {
+    Log.w("Xposed.location", text)
+    if (logToXposed) {
         XposedLogger.e(text)
     }
 }
@@ -22,6 +28,9 @@ internal fun Location.isFakeLocation() = extras != null && extras!!.getBoolean("
 internal fun Location.isGcj02Location() = extras != null && extras!!.getBoolean("wgs2gcj", false)
 
 internal fun Location.isTransformable(): Boolean {
+    if (javaClass != Location::class.java) {
+        return false
+    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && provider == LocationManager.FUSED_PROVIDER) {
         return false
     }
@@ -37,6 +46,12 @@ internal fun Location.isReliableFused(): Boolean {
         }
     }
     return false
+}
+
+internal fun Location.shouldTransform(): Boolean {
+    return safeGetLatLng()?.let {
+        return@let CoordTransform.outOfChina(it.latitude, it.longitude)
+    } ?: false
 }
 
 /**
@@ -78,22 +93,25 @@ internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
         if (!isTransformable() || isGcj02Location() || isFixUps()) {
             throw IllegalStateException("isTransformable=${isTransformable()}, isGcj02=${isGcj02Location()}, isFixUps=${isFixUps()}")
         }
-        val inputLatLng = safeGetLatLng() ?: return null
-        return CoordTransform.wgs84ToGcj02(inputLatLng)?.also { outputLatLng ->
-            safeSetLatLng(outputLatLng)
-            safeSetExtras(let bundle@{
-                val bundle = if (it.extras != null) it.extras else Bundle()
-                bundle!!.run {
-                    putBoolean("wgs2gcj", true)
-                    putDouble("latWgs84" ,inputLatLng.latitude)
-                    putDouble("lngWgs84" ,inputLatLng.longitude)
-                    putDouble("latGcj02" ,outputLatLng.latitude)
-                    putDouble("lngGcj02" ,outputLatLng.longitude)
-                }
-                return@bundle bundle
-            })
-            log("[${inputLatLng.latitude}, ${inputLatLng.longitude}] >> [${outputLatLng.latitude}, ${outputLatLng.longitude}]")
+        val oldLatLng = safeGetLatLng()
+        val newLatLng = oldLatLng?.let {
+            return@let CoordTransform.wgs84ToGcj02(oldLatLng)?.also { outputLatLng ->
+                safeSetLatLng(outputLatLng)
+                safeSetExtras(let bundle@{
+                    val bundle = if (it.extras != null) it.extras else Bundle()
+                    bundle!!.run {
+                        putBoolean("wgs2gcj", true)
+                        putDouble("latWgs84" ,oldLatLng.latitude)
+                        putDouble("lngWgs84" ,oldLatLng.longitude)
+                        putDouble("latGcj02" ,outputLatLng.latitude)
+                        putDouble("lngGcj02" ,outputLatLng.longitude)
+                    }
+                    return@bundle bundle
+                })
+            }
         }
+        log("   [${oldLatLng?.latitude}, ${oldLatLng?.longitude}] >> [${newLatLng?.latitude}, ${newLatLng?.longitude}]")
+        return newLatLng
     }
 }
 
@@ -155,25 +173,36 @@ internal fun Location.safeGetLatLng(): CoordTransform.LatLng? {
 }
 
 internal fun Location.safeSetLatLng(latLng: CoordTransform.LatLng) {
+    val old = safeGetLatLng()
     if (javaClass == Location::class.java) {
         latitude = latLng.latitude
         longitude = latLng.longitude
-        return
+    } else {
+        latitudeFiled?.set(this, latLng.latitude)
+        longitudeField?.set(this, latLng.longitude)
+        set(Location(this).also {
+            it.latitude = latLng.latitude
+            it.longitude = latLng.longitude
+        })
     }
-    latitudeFiled?.set(this, latLng.latitude)
-    longitudeField?.set(this, latLng.longitude)
+    val new = safeGetLatLng()
+    log("safeSetLatLng")
+    log("   [${old?.latitude}, ${old?.longitude}] >> [${latLng.latitude}, ${latLng.longitude}] = [${new?.latitude}, ${new?.longitude}]")
+    log("   change: ${new?.equals(old)}, setSuc: ${new?.equals(latLng)}")
 }
 
 internal fun Location.safeSetExtras(extras: Bundle) {
-    try {
+    if (javaClass == Location::class.java) {
         if (this.extras == null) {
             this.extras = extras
         } else {
             this.extras!!.putAll(extras)
         }
-    } catch (e: Throwable) {
-        log("setExtras err: ${e.message}")
+    } else {
         extrasField?.set(this, extras)
+        set(Location(this).also {
+            it.extras = extras
+        })
     }
 }
 
@@ -371,6 +400,13 @@ internal object CoordTransform {
         }
 
         constructor() {}
+
+        override fun equals(other: Any?): Boolean {
+            if (other is LatLng) {
+                return latitude == other.latitude && longitude == other.longitude
+            }
+            return false
+        }
     }
 }
 
