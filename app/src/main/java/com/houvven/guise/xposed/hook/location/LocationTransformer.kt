@@ -5,11 +5,18 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import com.houvven.ktx_xposed.logger.XposedLogger
 
 /**
  * @author Kaede
  * @since  21/2/2023
  */
+internal inline fun log(text: String, logToXposed: Boolean = false) {
+    Log.i("Xposed.location", text)
+    if (logToXposed) {
+        XposedLogger.e(text)
+    }
+}
 
 internal fun Location.isFakeLocation() = extras != null && extras!!.getBoolean("isFake", false)
 internal fun Location.isGcj02Location() = extras != null && extras!!.getBoolean("wgs2gcj", false)
@@ -19,6 +26,38 @@ internal fun Location.isTransformable(): Boolean {
         return false
     }
     return true
+}
+
+internal fun Location.isReliableFused(): Boolean {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && provider == LocationManager.FUSED_PROVIDER) {
+        if (extras != null) {
+            if (extras!!.containsKey("locationType") && extras!!.getInt("locationType", -1) != 1) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+/**
+ * FixUps means Location has been transformed into GCJ-02 coord by Google Map.
+ */
+internal fun Location.isFixUps(): Boolean {
+    if (javaClass != Location::class.java) {
+        if (extras != null && extras!!.containsKey("isFixUps")) {
+            return extras!!.getBoolean("isFixUps", false)
+        }
+        return toString().contains("fixups=true").also { isFixUps ->
+            extras = let bundle@{
+                val bundle = if (it.extras != null) it.extras else Bundle()
+                bundle!!.run {
+                    putBoolean("isFixUps", isFixUps)
+                }
+                return@bundle bundle
+            }
+        }
+    }
+    return false
 }
 
 internal fun Location.getLocationWgs84(): CoordTransform.LatLng? {
@@ -34,26 +73,28 @@ internal fun Location.getLocationGcj02(): CoordTransform.LatLng? {
 }
 
 internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
-    Log.i("Xposed.location", "wgs84ToGcj02: $this")
-    if (!isTransformable() || isGcj02Location()) {
-        throw IllegalStateException("isTransformable=${isTransformable()}" + ", isGcj02=${isGcj02Location()}")
-    }
-    val inputLatLng = safeGetLatLng() ?: return null
-    return CoordTransform.wgs84ToGcj02(inputLatLng)?.also { outputLatLng ->
-        latitude = outputLatLng.latitude
-        longitude = outputLatLng.longitude
-        extras = let bundle@{
-            val bundle = if (it.extras != null) it.extras else Bundle()
-            bundle!!.run {
-                putBoolean("wgs2gcj", true)
-                putDouble("latWgs84" ,inputLatLng.latitude)
-                putDouble("lngWgs84" ,inputLatLng.longitude)
-                putDouble("latGcj02" ,outputLatLng.latitude)
-                putDouble("lngGcj02" ,outputLatLng.longitude)
-            }
-            return@bundle bundle
+    log("wgs84ToGcj02: $this")
+    synchronized(this) {
+        if (!isTransformable() || isGcj02Location() || isFixUps()) {
+            throw IllegalStateException("isTransformable=${isTransformable()}, isGcj02=${isGcj02Location()}, isFixUps=${isFixUps()}")
         }
-        Log.i("Xposed.location", "[${inputLatLng.latitude}, ${inputLatLng.longitude}] >> [${outputLatLng.latitude}, ${outputLatLng.longitude}]")
+        val inputLatLng = safeGetLatLng() ?: return null
+        return CoordTransform.wgs84ToGcj02(inputLatLng)?.also { outputLatLng ->
+            latitude = outputLatLng.latitude
+            longitude = outputLatLng.longitude
+            extras = let bundle@{
+                val bundle = if (it.extras != null) it.extras else Bundle()
+                bundle!!.run {
+                    putBoolean("wgs2gcj", true)
+                    putDouble("latWgs84" ,inputLatLng.latitude)
+                    putDouble("lngWgs84" ,inputLatLng.longitude)
+                    putDouble("latGcj02" ,outputLatLng.latitude)
+                    putDouble("lngGcj02" ,outputLatLng.longitude)
+                }
+                return@bundle bundle
+            }
+            log("[${inputLatLng.latitude}, ${inputLatLng.longitude}] >> [${outputLatLng.latitude}, ${outputLatLng.longitude}]")
+        }
     }
 }
 
