@@ -74,18 +74,14 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                     log("hook ${method.name}")
                     afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
                         (hookParam.thisObject as? Location)?.let { location ->
-                            log("onMethodInvoke ${method.name}@${location.hashCode()}:", location.isReliableFused())
+                            log("onMethodInvoke ${method.name}@${location.hashCode()}")
                             log("   from:")
                             run {
                                 Throwable().stackTrace.forEach { log("       $it") }
                             }
                             log("   $location")
-                            log("   isGcj02=${location.isGcj02Location()}, isTransformable=${location.isTransformable()}")
-                            // if (location::class.java != Location::class.java) {
-                            //     log("methods=${location::class.java.declaredMethods.toList()}")
-                            // }
                             synchronized(location) {
-                                var mode = ""
+                                val mode: String
                                 val lastLatLng = lastGcj02LatLng
                                 val old = hookParam.result
                                 if (!location.isGcj02Location()) {
@@ -99,16 +95,21 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                                             }
                                         }
                                     } else {
-                                        // log("extras ${location.extras}")
-                                        log("   isReliableFused=${location.isReliableFused()}, isFixUps=${location.isFixUps()}")
-                                        if (location.isReliableFused() && !location.isFixUps()) {
+                                        if (location.isReliableFused(lastGcj02LatLng)) {
                                             mode = "fused"
-                                            // location.safeGetLatLng()?.let { updateLastLatLng(it) }
+                                            location.safeGetLatLng()?.let { updateLastLatLng(it) }
                                         } else {
-                                            mode = "cache"
-                                            // Get the last gcj-02 location
-                                            lastGcj02LatLng?.let {
-                                                // location.safeSetLatLng(it)
+                                            var refineLatLng = location.tryReverseTransform(lastGcj02LatLng)
+                                            if (refineLatLng != null) {
+                                                mode = "reverse"
+                                            } else {
+                                                mode = "cache"
+                                                // Get the last gcj-02 location
+                                                refineLatLng = lastGcj02LatLng
+                                            }
+                                            refineLatLng?.let {
+                                                location.safeSetLatLng(it)
+                                                updateLastLatLng(it)
                                                 when (method.name) {
                                                     "getLatitude" -> hookParam.result = it.latitude
                                                     "getLongitude" -> hookParam.result = it.longitude
@@ -382,15 +383,15 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
     }
 
     private fun updateLastLatLng(latLng: CoordTransform.LatLng) {
+        val last = lastGcj02LatLng
         lastGcj02LatLng?.let { start ->
-            val floats = floatArrayOf(-1f)
-            Location.distanceBetween(start.latitude, start.longitude, latLng.latitude, latLng.longitude, floats)
-            if (floats[0] > 10f) {
-                logw("DRIFTING!! ${floats[0]}")
+            val distance = start.toDistance(latLng)
+            if (distance > 100.0f) {
+                logw("DRIFTING!! $distance")
             }
         }
         lastGcj02LatLng = latLng
-        logw("updateLastLatLng: [${lastGcj02LatLng?.latitude}, ${lastGcj02LatLng?.longitude}] >> [${latLng.latitude},${latLng.longitude}]")
+        logw("updateLastLatLng: [${last?.latitude}, ${last?.longitude}] >> [${latLng.latitude},${latLng.longitude}]")
     }
 }
 

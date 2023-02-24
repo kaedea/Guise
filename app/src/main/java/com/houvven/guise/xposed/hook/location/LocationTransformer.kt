@@ -27,31 +27,63 @@ internal inline fun logw(text: String, logToXposed: Boolean = true) {
 internal fun Location.isFakeLocation() = extras != null && extras!!.getBoolean("isFake", false)
 internal fun Location.isGcj02Location() = extras != null && extras!!.getBoolean("wgs2gcj", false)
 
+internal fun Location.shouldTransform(): Boolean {
+    return safeGetLatLng()?.let {
+        return@let CoordTransform.outOfChina(it.latitude, it.longitude)
+    } ?: false
+}
+
 internal fun Location.isTransformable(): Boolean {
-    if (javaClass != Location::class.java) {
-        return false
-    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && provider == LocationManager.FUSED_PROVIDER) {
+        // Fused Location (both Location & GmmLocation) might has been transformed
+        // Should not be transformed again
         return false
     }
     return true
 }
 
-internal fun Location.isReliableFused(): Boolean {
+internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null): Boolean {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && provider == LocationManager.FUSED_PROVIDER) {
-        if (extras != null) {
-            if (extras!!.containsKey("locationType") && extras!!.getInt("locationType", -1) != 1) {
-                return true
+        // Fused Location might has been transformed twice: We transformed it and then GMS did it again
+        // In this case, we give up this location, or reverse it backward.
+        // Likely twice-transformed:
+        //  - fixups=true
+        //  - locationType=1
+        //  - Suddenly drifting of more than 600 meters (diff of wgs-84 & gcj-02 in the same position)
+        if (!isFixUps()) {
+            // Check locationType
+            // if (extras != null) {
+            //     if (extras!!.containsKey("locationType") && extras!!.getInt("locationType", -1) == 1) {
+            //         return false
+            //     }
+            // }
+            // Check if suddenly drifting
+            if (lastLatLng != null) {
+                safeGetLatLng()?.let {
+                    val delta = it.toDistance(lastLatLng)
+                    if (delta in 0.0..300.0) {
+                        // Nope
+                        log("reliableFused: [${lastLatLng.latitude}, ${lastLatLng.longitude}] >> [${it.latitude},${it.longitude}], moving: $delta")
+                        return true
+                    }
+                }
             }
         }
     }
     return false
 }
 
-internal fun Location.shouldTransform(): Boolean {
-    return safeGetLatLng()?.let {
-        return@let CoordTransform.outOfChina(it.latitude, it.longitude)
-    } ?: false
+internal fun Location.tryReverseTransform(lastLatLng: CoordTransform.LatLng?): CoordTransform.LatLng? {
+    if (lastLatLng != null) {
+        safeGetLatLng()?.let {
+            CoordTransform.wgs84ToGcj02(lastLatLng)?.let { twiceTransLatLng ->
+                if (twiceTransLatLng.toDistance(it) in 0.0..10.0) {
+                    return CoordTransform.gcj02ToWgs84(it)
+                }
+            }
+        }
+    }
+    return null
 }
 
 /**
@@ -111,6 +143,12 @@ internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
             }
         }
         log("   [${oldLatLng?.latitude}, ${oldLatLng?.longitude}] >> [${newLatLng?.latitude}, ${newLatLng?.longitude}]")
+        if (oldLatLng != null && newLatLng != null) {
+            log("   moving: ${oldLatLng.toDistance(newLatLng)}")
+            CoordTransform.gcj02ToWgs84(newLatLng)?.let { revert ->
+                log("   [${revert.latitude}, ${revert.longitude}] revert delta: ${revert.toDistance(oldLatLng)}")
+            }
+        }
         return newLatLng
     }
 }
@@ -406,6 +444,12 @@ internal object CoordTransform {
                 return latitude == other.latitude && longitude == other.longitude
             }
             return false
+        }
+
+        fun toDistance(end: LatLng): Float {
+            val floats = floatArrayOf(-1f)
+            Location.distanceBetween(this.latitude, this.longitude, end.latitude, end.longitude, floats)
+            return floats[0]
         }
     }
 }
