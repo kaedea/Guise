@@ -30,6 +30,10 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
 
     override fun onHook() {
         log("onHook config: latitude=${config.latitude}, longitude=${config.longitude}, fixGoogleMapDrift=${config.fixGoogleMapDrift}")
+        log("   from:")
+        run {
+            Throwable().stackTrace.forEach { log("       $it") }
+        }
         if (!isFakeLocationMode && !isFixGoogleMapDriftMode) {
             // LocationHook Disabled
             return
@@ -80,6 +84,7 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                                 Throwable().stackTrace.forEach { log("       $it") }
                             }
                             log("   $location")
+                            log("   provider: ${location.provider}")
                             synchronized(location) {
                                 val mode: String
                                 val lastLatLng = lastGcj02LatLng
@@ -89,6 +94,7 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                                         mode = "transform"
                                         location.wgs84ToGcj02()?.let {
                                             location.safeSetLatLng(it)
+                                            updateLastLatLng(it)
                                             when (method.name) {
                                                 "getLatitude" -> hookParam.result = it.latitude
                                                 "getLongitude" -> hookParam.result = it.longitude
@@ -363,7 +369,7 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
         if (!isFixGoogleMapDriftMode) {
             throw IllegalStateException("isFixGoogleMapDriftMode=${isFixGoogleMapDriftMode}")
         }
-        return Location(location).also {
+        return location.also {
             if (it.isGcj02Location()) {
                 log("   isGcj02Location: true")
                 return@also
@@ -376,22 +382,23 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                 if (keepAsLastLatLng) {
                     updateLastLatLng(latLng)
                 }
-                it.time = System.currentTimeMillis()
-                it.elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+                // it.time = System.currentTimeMillis()
+                // it.elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
             }
         }
     }
 
     private fun updateLastLatLng(latLng: CoordTransform.LatLng) {
         val last = lastGcj02LatLng
-        lastGcj02LatLng?.let { start ->
-            val distance = start.toDistance(latLng)
-            if (distance > 100.0f) {
-                logw("DRIFTING!! $distance")
-            }
-        }
         lastGcj02LatLng = latLng
         logw("updateLastLatLng: [${last?.latitude}, ${last?.longitude}] >> [${latLng.latitude},${latLng.longitude}]")
+        last?.let { start ->
+            val distance = start.toDistance(latLng)
+            if (distance > 100.0f) {
+                logw("   DRIFTING!! $distance")
+            }
+            logw("   moving: $distance")
+        }
     }
 }
 
