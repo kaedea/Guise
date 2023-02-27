@@ -53,7 +53,7 @@ internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null)
         //  - fixups=true
         //  - locationType=1
         //  - Suddenly drifting of about 629 meters (diff of wgs-84 & gcj-02 in the same real position)
-        if (extras?.containsKey("locationType") == true && extras!!.getInt("locationType", -1) == 1) {
+        if (extras?.containsKey("locationType") == true && extras!!.getInt("locationType", -1) != 3) {
             return false
         }
         if (!isFixUps()) {
@@ -61,7 +61,7 @@ internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null)
             if (lastLatLng != null) {
                 safeGetLatLng()?.let {
                     val delta = it.toDistance(lastLatLng)
-                    if (delta in 0.0..50.0) {
+                    if (delta in 0.0..100.0) {
                         // Nope
                         log("reliableFused: [${lastLatLng.latitude}, ${lastLatLng.longitude}] >> [${it.latitude},${it.longitude}], moving: $delta")
                         return true
@@ -426,6 +426,8 @@ internal object CoordTransform {
     class LatLng {
         var latitude = 0.0
         var longitude = 0.0
+        var time = 0L
+        var elapsedRealtimeNanos = 0L
 
         constructor(latitude: Double, longitude: Double) {
             this.latitude = latitude
@@ -433,6 +435,11 @@ internal object CoordTransform {
         }
 
         constructor() {}
+
+        fun setTimes(time: Long, elapsedRealtimeNanos: Long) {
+            this.time = time
+            this.elapsedRealtimeNanos = elapsedRealtimeNanos
+        }
 
         override fun equals(other: Any?): Boolean {
             if (other is LatLng) {

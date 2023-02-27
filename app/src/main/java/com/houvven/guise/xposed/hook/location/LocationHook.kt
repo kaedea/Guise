@@ -94,7 +94,7 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                                         mode = "transform"
                                         location.wgs84ToGcj02()?.let {
                                             location.safeSetLatLng(it)
-                                            updateLastLatLng(it)
+                                            updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
                                             when (method.name) {
                                                 "getLatitude" -> hookParam.result = it.latitude
                                                 "getLongitude" -> hookParam.result = it.longitude
@@ -103,19 +103,26 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                                     } else {
                                         if (location.isReliableFused(lastGcj02LatLng)) {
                                             mode = "fused"
-                                            location.safeGetLatLng()?.let { updateLastLatLng(it) }
+                                            location.safeGetLatLng()?.let {
+                                                updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
+                                            }
                                         } else {
                                             var refineLatLng = location.tryReverseTransform(lastGcj02LatLng)
                                             if (refineLatLng != null) {
                                                 mode = "reverse"
                                             } else {
-                                                mode = "cache"
-                                                // Get the last gcj-02 location
-                                                refineLatLng = lastGcj02LatLng
+                                                // Try pass by the last gcj-02 location
+                                                if (lastGcj02LatLng != null &&
+                                                    location.elapsedRealtimeNanos - lastGcj02LatLng!!.elapsedRealtimeNanos in 0..10 * 1000000L) { // 10s
+                                                    mode = "cache"
+                                                    refineLatLng = lastGcj02LatLng
+                                                } else {
+                                                    mode = "unknown"
+                                                }
                                             }
                                             refineLatLng?.let {
                                                 location.safeSetLatLng(it)
-                                                updateLastLatLng(it)
+                                                updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
                                                 when (method.name) {
                                                     "getLatitude" -> hookParam.result = it.latitude
                                                     "getLongitude" -> hookParam.result = it.longitude
@@ -380,15 +387,15 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
             }
             it.wgs84ToGcj02()?.let { latLng ->
                 if (keepAsLastLatLng) {
-                    updateLastLatLng(latLng)
+                    updateLastLatLng(latLng).setTimes(location.time, location.elapsedRealtimeNanos)
                 }
-                // it.time = System.currentTimeMillis()
-                // it.elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+                it.time = System.currentTimeMillis()
+                it.elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
             }
         }
     }
 
-    private fun updateLastLatLng(latLng: CoordTransform.LatLng) {
+    private fun updateLastLatLng(latLng: CoordTransform.LatLng): CoordTransform.LatLng {
         val last = lastGcj02LatLng
         lastGcj02LatLng = latLng
         logw("updateLastLatLng: [${last?.latitude}, ${last?.longitude}] >> [${latLng.latitude},${latLng.longitude}]")
@@ -399,6 +406,7 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
             }
             logw("   moving: $distance")
         }
+        return lastGcj02LatLng!!
     }
 }
 
