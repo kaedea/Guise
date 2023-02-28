@@ -85,14 +85,41 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                             }
                             log("   $location")
                             log("   provider: ${location.provider}")
-                            synchronized(location) {
-                                val mode: String
-                                val lastLatLng = lastGcj02LatLng
-                                val old = hookParam.result
-                                if (!location.isGcj02Location()) {
-                                    if (location.isTransformable()) {
-                                        mode = "transform"
-                                        location.wgs84ToGcj02()?.let {
+                            val mode: String
+                            val lastLatLng = lastGcj02LatLng
+                            val old = hookParam.result
+                            if (!location.isGcj02Location()) {
+                                if (location.isTransformable()) {
+                                    mode = "transform"
+                                    location.wgs84ToGcj02()?.let {
+                                        location.safeSetLatLng(it)
+                                        updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
+                                        when (method.name) {
+                                            "getLatitude" -> hookParam.result = it.latitude
+                                            "getLongitude" -> hookParam.result = it.longitude
+                                        }
+                                    }
+                                } else {
+                                    if (location.isReliableFused(lastGcj02LatLng)) {
+                                        mode = "fused"
+                                        location.safeGetLatLng()?.let {
+                                            updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
+                                        }
+                                    } else {
+                                        var refineLatLng = location.tryReverseTransform(lastGcj02LatLng)
+                                        if (refineLatLng != null) {
+                                            mode = "reverse"
+                                        } else {
+                                            // Try pass by the last gcj-02 location
+                                            if (lastGcj02LatLng != null &&
+                                                location.elapsedRealtimeNanos - lastGcj02LatLng!!.elapsedRealtimeNanos in 0..10 * 1000000L) { // 10s
+                                                mode = "cache"
+                                                refineLatLng = lastGcj02LatLng
+                                            } else {
+                                                mode = "unknown"
+                                            }
+                                        }
+                                        refineLatLng?.let {
                                             location.safeSetLatLng(it)
                                             updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
                                             when (method.name) {
@@ -100,43 +127,14 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                                                 "getLongitude" -> hookParam.result = it.longitude
                                             }
                                         }
-                                    } else {
-                                        if (location.isReliableFused(lastGcj02LatLng)) {
-                                            mode = "fused"
-                                            location.safeGetLatLng()?.let {
-                                                updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
-                                            }
-                                        } else {
-                                            var refineLatLng = location.tryReverseTransform(lastGcj02LatLng)
-                                            if (refineLatLng != null) {
-                                                mode = "reverse"
-                                            } else {
-                                                // Try pass by the last gcj-02 location
-                                                if (lastGcj02LatLng != null &&
-                                                    location.elapsedRealtimeNanos - lastGcj02LatLng!!.elapsedRealtimeNanos in 0..10 * 1000000L) { // 10s
-                                                    mode = "cache"
-                                                    refineLatLng = lastGcj02LatLng
-                                                } else {
-                                                    mode = "unknown"
-                                                }
-                                            }
-                                            refineLatLng?.let {
-                                                location.safeSetLatLng(it)
-                                                updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
-                                                when (method.name) {
-                                                    "getLatitude" -> hookParam.result = it.latitude
-                                                    "getLongitude" -> hookParam.result = it.longitude
-                                                }
-                                            }
-                                        }
                                     }
-                                } else {
-                                    mode = "gcj-02"
                                 }
-                                log("   mode: $mode")
-                                log("   last: [${lastLatLng?.latitude}, ${lastLatLng?.longitude}]")
-                                log("   ${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
+                            } else {
+                                mode = "gcj-02"
                             }
+                            log("   mode: $mode")
+                            log("   last: [${lastLatLng?.latitude}, ${lastLatLng?.longitude}]")
+                            log("   ${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
                         }
                     }
                 }

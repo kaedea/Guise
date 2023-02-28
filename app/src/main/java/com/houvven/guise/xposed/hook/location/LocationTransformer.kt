@@ -24,8 +24,19 @@ internal inline fun logw(text: String, logToXposed: Boolean = true) {
     }
 }
 
+private val mGcj02Holder by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { LinkedHashSet<Int>() }
 internal fun Location.isFakeLocation() = extras != null && extras!!.getBoolean("isFake", false)
-internal fun Location.isGcj02Location() = provider?.endsWith("@gcj02") ?: (extras != null && extras!!.getBoolean("wgs2gcj", false))
+internal fun Location.isGcj02Location(): Boolean {
+    synchronized (mGcj02Holder) {
+        if (mGcj02Holder.contains(hashCode())) {
+            return true
+        }
+    }
+    if (provider?.endsWith("@gcj02") == true) {
+        return true
+    }
+    return extras != null && extras!!.getBoolean("wgs2gcj", false)
+}
 
 internal fun Location.shouldTransform(): Boolean {
     return safeGetLatLng()?.let {
@@ -61,7 +72,7 @@ internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null)
             if (lastLatLng != null) {
                 safeGetLatLng()?.let {
                     val delta = it.toDistance(lastLatLng)
-                    if (delta in 0.0..100.0) {
+                    if (delta in 0.0..400.0) {
                         // Nope
                         log("reliableFused: [${lastLatLng.latitude}, ${lastLatLng.longitude}] >> [${it.latitude},${it.longitude}], moving: $delta")
                         return true
@@ -121,38 +132,45 @@ internal fun Location.getLocationGcj02(): CoordTransform.LatLng? {
 
 internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
     log("wgs84ToGcj02@${hashCode()}: $this")
-    synchronized(this) {
-        if (!isTransformable() || isGcj02Location() || isFixUps()) {
-            throw IllegalStateException("isTransformable=${isTransformable()}, isGcj02=${isGcj02Location()}, isFixUps=${isFixUps()}")
-        }
-        val oldLatLng = safeGetLatLng()
-        val newLatLng = oldLatLng?.let {
-            return@let CoordTransform.wgs84ToGcj02(oldLatLng)?.also { outputLatLng ->
-                safeSetLatLng(outputLatLng)
-                provider = "${provider}@gcj02"
-                safeSetExtras(let bundle@{
-                    val bundle = if (it.extras != null) it.extras else Bundle()
-                    bundle!!.run {
-                        putBoolean("wgs2gcj", true)
-                        putDouble("latWgs84" ,oldLatLng.latitude)
-                        putDouble("lngWgs84" ,oldLatLng.longitude)
-                        putDouble("latGcj02" ,outputLatLng.latitude)
-                        putDouble("lngGcj02" ,outputLatLng.longitude)
-                    }
-                    return@bundle bundle
-                })
-            }
-        }
-        log("   [${oldLatLng?.latitude}, ${oldLatLng?.longitude}] >> [${newLatLng?.latitude}, ${newLatLng?.longitude}]")
-        if (oldLatLng != null && newLatLng != null) {
-            log("   delta: ${oldLatLng.toDistance(newLatLng)}")
-            CoordTransform.gcj02ToWgs84(newLatLng)?.let { revert ->
-                log("   [${revert.latitude}, ${revert.longitude}] reverse delta: ${revert.toDistance(oldLatLng)}")
-            }
-        }
-        log("cj02@${hashCode()}: $this")
-        return newLatLng
+    if (!isTransformable() || isGcj02Location() || isFixUps()) {
+        throw IllegalStateException("isTransformable=${isTransformable()}, isGcj02=${isGcj02Location()}, isFixUps=${isFixUps()}")
     }
+    val oldLatLng = safeGetLatLng()
+    val newLatLng = oldLatLng?.let {
+        return@let CoordTransform.wgs84ToGcj02(oldLatLng)?.also { outputLatLng ->
+            safeSetLatLng(outputLatLng)
+            safeSetExtras(let bundle@{
+                val bundle = if (it.extras != null) it.extras else Bundle()
+                bundle!!.run {
+                    putBoolean("wgs2gcj", true)
+                    putDouble("latWgs84" ,oldLatLng.latitude)
+                    putDouble("lngWgs84" ,oldLatLng.longitude)
+                    putDouble("latGcj02" ,outputLatLng.latitude)
+                    putDouble("lngGcj02" ,outputLatLng.longitude)
+                }
+                return@bundle bundle
+            })
+            // provider = "${provider}@gcj02"
+            synchronized(mGcj02Holder) {
+                mGcj02Holder.add(hashCode())
+                val overHeat = 100
+                if (mGcj02Holder.size >= overHeat) {
+                    val copy = ArrayList(mGcj02Holder)
+                    mGcj02Holder.clear()
+                    mGcj02Holder.addAll(copy.subList(copy.size - overHeat/2, copy.size - 1))
+                }
+            }
+        }
+    }
+    log("   [${oldLatLng?.latitude}, ${oldLatLng?.longitude}] >> [${newLatLng?.latitude}, ${newLatLng?.longitude}]")
+    if (oldLatLng != null && newLatLng != null) {
+        log("   delta: ${oldLatLng.toDistance(newLatLng)}")
+        CoordTransform.gcj02ToWgs84(newLatLng)?.let { revert ->
+            log("   [${revert.latitude}, ${revert.longitude}] reverse delta: ${revert.toDistance(oldLatLng)}")
+        }
+    }
+    log("cj02@${hashCode()}: $this")
+    return newLatLng
 }
 
 private val latitudeFiled by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
