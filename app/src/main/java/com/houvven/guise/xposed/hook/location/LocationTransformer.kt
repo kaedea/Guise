@@ -4,29 +4,17 @@ import android.location.Location
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
-import com.houvven.ktx_xposed.logger.XposedLogger
+import com.houvven.ktx_xposed.logger.logcat
+import com.houvven.ktx_xposed.logger.logcatInfo
 
 /**
  * @author Kaede
  * @since  21/2/2023
  */
-internal inline fun log(text: String, logToXposed: Boolean = false) {
-    Log.i("Xposed.location", text)
-    if (logToXposed) {
-        XposedLogger.i(text)
-    }
-}
-internal inline fun logw(text: String, logToXposed: Boolean = true) {
-    Log.w("Xposed.location", text)
-    if (logToXposed) {
-        XposedLogger.e(text)
-    }
-}
 
 private val mGcj02Holder by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     return@lazy object : LinkedHashSet<Int>() {
-        val limit = 50
+        val limit = 100
         override fun add(element: Int): Boolean {
             val add = super.add(element)
             if (add && size >= limit) {
@@ -71,6 +59,7 @@ internal fun Location.isTransformable(): Boolean {
 }
 
 internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null): Boolean {
+    logcatInfo { "isReliableFused: last=$lastLatLng" }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && provider == LocationManager.FUSED_PROVIDER) {
         // Fused Location might has been transformed twice: We transformed it and then GMS did it again
         // In this case, we give up this location, or reverse it backward.
@@ -79,6 +68,7 @@ internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null)
         //  - locationType=1
         //  - Suddenly drifting of about 629 meters (diff of wgs-84 & gcj-02 in the same real position)
         if (extras?.containsKey("locationType") == true && extras!!.getInt("locationType", -1) != 3) {
+            logcatInfo { "\tno: locationType=${extras!!.containsKey("locationType")}" }
             return false
         }
         if (!isFixUps()) {
@@ -88,12 +78,18 @@ internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null)
                     val delta = it.toDistance(lastLatLng)
                     if (delta in 0.0..400.0) {
                         // Nope
-                        log("reliableFused: [${lastLatLng.latitude}, ${lastLatLng.longitude}] >> [${it.latitude},${it.longitude}], moving: $delta")
+                        logcatInfo { "\tyes: [${lastLatLng.latitude}, ${lastLatLng.longitude}] >> [${it.latitude},${it.longitude}], moving: $delta" }
                         return true
+                    } else {
+                        logcatInfo { "\tno: moving=${delta}" }
                     }
                 }
             }
+        } else {
+            logcatInfo { "\tno: fixups" }
         }
+    } else {
+        logcatInfo { "\tno: provider=${provider}" }
     }
     return false
 }
@@ -145,7 +141,7 @@ internal fun Location.getLocationGcj02(): CoordTransform.LatLng? {
 }
 
 internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
-    log("wgs84ToGcj02@${hashCode()}: $this")
+    logcatInfo { "wgs84ToGcj02@${hashCode()}: $this" }
     if (!isTransformable() || isGcj02Location() || isFixUps()) {
         throw IllegalStateException("isTransformable=${isTransformable()}, isGcj02=${isGcj02Location()}, isFixUps=${isFixUps()}")
     }
@@ -170,14 +166,14 @@ internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
             }
         }
     }
-    log("   [${oldLatLng?.latitude}, ${oldLatLng?.longitude}] >> [${newLatLng?.latitude}, ${newLatLng?.longitude}]")
+    logcatInfo { "\t[${oldLatLng?.latitude}, ${oldLatLng?.longitude}] >> [${newLatLng?.latitude}, ${newLatLng?.longitude}]" }
     if (oldLatLng != null && newLatLng != null) {
-        log("   delta: ${oldLatLng.toDistance(newLatLng)}")
+        logcatInfo { "\tdelta: ${oldLatLng.toDistance(newLatLng)}" }
         CoordTransform.gcj02ToWgs84(newLatLng)?.let { revert ->
-            log("   [${revert.latitude}, ${revert.longitude}] reverse delta: ${revert.toDistance(oldLatLng)}")
+            logcatInfo { "\t[${revert.latitude}, ${revert.longitude}] reverse delta: ${revert.toDistance(oldLatLng)}" }
         }
     }
-    log("cj02@${hashCode()}: $this")
+    logcatInfo { "cj02@${hashCode()}: $this" }
     return newLatLng
 }
 
@@ -248,9 +244,11 @@ internal fun Location.safeSetLatLng(latLng: CoordTransform.LatLng) {
         longitudeField?.set(this, latLng.longitude)
     }
     val new = safeGetLatLng()
-    log("safeSetLatLng")
-    log("   [${old?.latitude}, ${old?.longitude}] >> [${latLng.latitude}, ${latLng.longitude}] = [${new?.latitude}, ${new?.longitude}]")
-    log("   change: ${new?.equals(old)}, setSuc: ${new?.equals(latLng)}")
+    logcat {
+        info("safeSetLatLng")
+        info("\t[${old?.latitude}, ${old?.longitude}] >> [${latLng.latitude}, ${latLng.longitude}] = [${new?.latitude}, ${new?.longitude}]")
+        info("\tchange: ${new?.equals(old)}, setSuc: ${new?.equals(latLng)}")
+    }
 }
 
 internal fun Location.safeSetExtras(extras: Bundle) {

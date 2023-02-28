@@ -2,15 +2,9 @@ package com.houvven.guise.xposed
 
 import com.houvven.guise.BuildConfig
 import com.houvven.guise.xposed.config.ModuleConfig
-import com.houvven.guise.xposed.hook.BatteryHook
-import com.houvven.guise.xposed.hook.BuildConfigHook
-import com.houvven.guise.xposed.hook.LocalHook
-import com.houvven.guise.xposed.hook.OsBuildHook
-import com.houvven.guise.xposed.hook.ScreenshotsHook
-import com.houvven.guise.xposed.hook.UniquelyIdHook
+import com.houvven.guise.xposed.hook.*
 import com.houvven.guise.xposed.hook.location.CellLocationHook
 import com.houvven.guise.xposed.hook.location.LocationHook
-import com.houvven.guise.xposed.hook.location.log
 import com.houvven.guise.xposed.hook.netowork.NetworkHook
 import com.houvven.guise.xposed.other.BlankPass
 import com.houvven.guise.xposed.other.HookSuccessHint

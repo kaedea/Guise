@@ -8,6 +8,9 @@ import android.os.Bundle
 import android.os.SystemClock
 import com.houvven.guise.xposed.LoadPackageHandler
 import com.houvven.ktx_xposed.hook.*
+import com.houvven.ktx_xposed.logger.logcat
+import com.houvven.ktx_xposed.logger.logcatInfo
+import com.houvven.ktx_xposed.logger.logcatWarn
 
 
 @Suppress("DEPRECATION")
@@ -16,6 +19,10 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
     private var fakeLatitude = config.latitude
     private var fakeLongitude = config.longitude
     private var lastGcj02LatLng: CoordTransform.LatLng? = null
+        set(value) {
+            logcatWarn { "updateLastLatLng: [${field?.latitude}, ${field?.longitude}] >> [${value?.latitude},${value?.longitude}]" }
+            field = value
+        }
 
     private val svCount = 5
     private val svidWithFlags = intArrayOf(1, 2, 3, 4, 5)
@@ -29,10 +36,12 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
     private val isFixGoogleMapDriftMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { config.fixGoogleMapDrift }
 
     override fun onHook() {
-        log("onHook config: latitude=${config.latitude}, longitude=${config.longitude}, fixGoogleMapDrift=${config.fixGoogleMapDrift}")
-        log("   from:")
-        run {
-            Throwable().stackTrace.forEach { log("       $it") }
+        logcat {
+            info("onHook config: latitude=${config.latitude}, longitude=${config.longitude}, fixGoogleMapDrift=${config.fixGoogleMapDrift}")
+            info("\tfrom:")
+            Throwable().stackTrace.forEach {
+                info("\t\t$it")
+            }
         }
         if (!isFakeLocationMode && !isFixGoogleMapDriftMode) {
             // LocationHook Disabled
@@ -63,7 +72,6 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
     }
 
     private fun fakeLatlng() {
-        log("fakeLatlng")
         if (isFakeLocationMode) {
             Location::class.java.run {
                 setMethodResult("getLongitude", fakeLongitude)
@@ -75,16 +83,17 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                 declaredMethods.filter {
                     (it.name == "getLatitude" || it.name == "getLongitude") && it.returnType == Double::class.java
                 }.forEach { method ->
-                    log("hook ${method.name}")
                     afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
                         (hookParam.thisObject as? Location)?.let { location ->
-                            log("onMethodInvoke ${method.name}@${location.hashCode()}")
-                            log("   from:")
-                            run {
-                                Throwable().stackTrace.forEach { log("       $it") }
+                            logcat {
+                                info("onMethodInvoke ${method.name}@${location.hashCode()}")
+                                info("\tfrom:")
+                                Throwable().stackTrace.forEach {
+                                    info("\t\t$it")
+                                }
+                                info("\t$location")
+                                info("\tprovider: ${location.provider}")
                             }
-                            log("   $location")
-                            log("   provider: ${location.provider}")
                             val mode: String
                             val lastLatLng = lastGcj02LatLng
                             val old = hookParam.result
@@ -132,9 +141,11 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                             } else {
                                 mode = "gcj-02"
                             }
-                            log("   mode: $mode")
-                            log("   last: [${lastLatLng?.latitude}, ${lastLatLng?.longitude}]")
-                            log("   ${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
+                            logcat {
+                                info("\tmode: $mode")
+                                info("\tlast: [${lastLatLng?.latitude}, ${lastLatLng?.longitude}]")
+                                info("\t${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
+                            }
                         }
                     }
                 }
@@ -143,7 +154,6 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
     }
 
     private fun setLastLocation() {
-        log("setLastLocation")
         if (isFakeLocationMode) {
             LocationManager::class.java.setSomeSameNameMethodResult(
                 "getLastLocation",
@@ -156,10 +166,9 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                 declaredMethods.filter {
                     (it.name == "getLastLocation" || it.name == "getLastKnownLocation") && it.returnType == Location::class.java
                 }.forEach { method ->
-                    log("hook ${method.name}")
                     afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
                         (hookParam.result as? Location)?.let {
-                            log("onMethodInvoke ${method.name}")
+                            logcatInfo { "onMethodInvoke ${method.name}" }
                             hookParam.result = modifyLocationToGcj02(it, true)
                         }
                     }
@@ -252,7 +261,6 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
     }
 
     private fun hookLocationUpdate() {
-        log("hookLocationUpdate")
         val requestLocationUpdates = "requestLocationUpdates"
         val requestSingleUpdate = "requestSingleUpdate"
         val getCurrentLocation = "getCurrentLocation"
@@ -292,18 +300,17 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                         continue
                     } else {
                         // Hook and modify location
-                        log("hook: $target")
                         beforeHookedMethod(target, *paramsTypes) {
-                            log("beforeHookedMethod $target, idx=$indexOf")
+                            logcatInfo { "onMethodInvoke $target, idx=$indexOf" }
                             val listener = it.args[indexOf] as LocationListener
                             val wrapper: LocationListener = object : LocationListener {
                                 override fun onLocationChanged(location: Location) {
-                                    log("onLocationChanged")
+                                    logcatInfo { "onLocationChanged" }
                                     listener.onLocationChanged(modifyLocationToGcj02(location, true))
                                 }
 
                                 override fun onLocationChanged(locations: List<Location>) {
-                                    log("onLocationChanged list: ${locations.size}")
+                                    logcatInfo { "onLocationChanged list: ${locations.size}" }
                                     val fakeLocations = arrayListOf<Location>()
                                     for (location in locations) {
                                         fakeLocations.add(modifyLocationToGcj02(location, true))
@@ -314,24 +321,24 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                                 }
 
                                 override fun onFlushComplete(requestCode: Int) {
-                                    log("onFlushComplete")
+                                    logcatInfo { "onFlushComplete" }
                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                                         listener.onFlushComplete(requestCode)
                                     }
                                 }
 
                                 override fun onStatusChanged(provider: String, status: Int, extras: Bundle) {
-                                    log("onStatusChanged provider")
+                                    logcatInfo { "onStatusChanged: provider=$provider, status=$status" }
                                     listener.onStatusChanged(provider, status, extras)
                                 }
 
                                 override fun onProviderEnabled(provider: String) {
-                                    log("onProviderEnabled")
+                                    logcatInfo { "onProviderEnabled" }
                                     listener.onProviderEnabled(provider)
                                 }
 
                                 override fun onProviderDisabled(provider: String) {
-                                    log("onProviderDisabled")
+                                    logcatInfo { "onProviderDisabled" }
                                     listener.onProviderDisabled(provider)
                                 }
                             }
@@ -348,7 +355,7 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
     }
 
     private fun modifyLocationToFake(location: Location): Location {
-        log("modifyLocationToFake: $location")
+        logcatInfo { "modifyLocationToFake: $location" }
         if (!isFakeLocationMode) {
             throw IllegalStateException("isFakeLocationMode=${isFakeLocationMode}")
         }
@@ -370,17 +377,17 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
 
     @Suppress("SameParameterValue")
     private fun modifyLocationToGcj02(location: Location, keepAsLastLatLng: Boolean = true): Location {
-        log("modifyLocationToGcj02: $location")
+        logcatInfo { "modifyLocationToGcj02: $location" }
         if (!isFixGoogleMapDriftMode) {
             throw IllegalStateException("isFixGoogleMapDriftMode=${isFixGoogleMapDriftMode}")
         }
         return location.also {
             if (it.isGcj02Location()) {
-                log("   isGcj02Location: true")
+                logcatInfo { "\tisGcj02Location: true" }
                 return@also
             }
             if (!location.isTransformable()) {
-                log("   isTransformable: false")
+                logcatInfo { "\tisTransformable: false" }
                 return@also
             }
             it.wgs84ToGcj02()?.let { latLng ->
@@ -396,13 +403,14 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
     private fun updateLastLatLng(latLng: CoordTransform.LatLng): CoordTransform.LatLng {
         val last = lastGcj02LatLng
         lastGcj02LatLng = latLng
-        logw("updateLastLatLng: [${last?.latitude}, ${last?.longitude}] >> [${latLng.latitude},${latLng.longitude}]")
         last?.let { start ->
-            val distance = start.toDistance(latLng)
-            if (distance > 100.0f) {
-                logw("   DRIFTING!! $distance")
+            logcat {
+                val distance = start.toDistance(latLng)
+                if (distance > 100.0f) {
+                    error("\tDRIFTING!! $distance")
+                }
+                error("\tmoving: $distance")
             }
-            logw("   moving: $distance")
         }
         return lastGcj02LatLng!!
     }

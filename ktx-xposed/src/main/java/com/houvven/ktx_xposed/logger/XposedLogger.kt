@@ -6,15 +6,17 @@ import android.net.Uri
 import android.os.Environment
 import android.util.Log
 import androidx.core.content.contentValuesOf
+import com.houvven.ktx_xposed.BuildConfig
 import com.houvven.ktx_xposed.hook.afterHookedMethod
 import com.houvven.ktx_xposed.hook.lppram
+import com.houvven.ktx_xposed.logger.XposedLogger.TAG
 import java.io.File
 
 
 @SuppressLint("StaticFieldLeak")
 object XposedLogger {
 
-    private const val TAG = "XposedLogger"
+    const val TAG = "XposedLogger"
 
     object Level {
         const val DEBUG = 'D'
@@ -64,10 +66,49 @@ object XposedLogger {
                 }
                 logList.clear()
             }.onFailure {
-
             }
         }
     }
 
 
+    class Wrapper(private val logToXposed: Boolean) {
+        fun info(text: String, tag: String = TAG) {
+            if (BuildConfig.DEBUG) {
+                Log.i(tag, text)
+            }
+            if (logToXposed) {
+                i(text)
+            }
+        }
+
+        fun error(text: String, tag: String = TAG) {
+            if (BuildConfig.DEBUG) {
+                Log.e(tag, text)
+            }
+            if (logToXposed) {
+                e(text)
+            }
+        }
+    }
+}
+
+inline fun logcat(logToXposed: Boolean = false, block: XposedLogger.Wrapper.() -> Unit) {
+    if (!BuildConfig.DEBUG && !logToXposed) {
+        return
+    }
+    block(XposedLogger.Wrapper(logToXposed))
+}
+
+inline fun logcatInfo(tag: String = TAG, logToXposed: Boolean = false, block: () -> String) {
+    if (!BuildConfig.DEBUG && !logToXposed) {
+        return
+    }
+    XposedLogger.Wrapper(logToXposed).info(block(), tag)
+}
+
+inline fun logcatWarn(tag: String = TAG, logToXposed: Boolean = false, block: () -> String) {
+    if (!BuildConfig.DEBUG && !logToXposed) {
+        return
+    }
+    XposedLogger.Wrapper(logToXposed).error(block(), tag)
 }
