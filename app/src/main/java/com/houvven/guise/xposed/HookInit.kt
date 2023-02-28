@@ -10,6 +10,7 @@ import com.houvven.guise.xposed.hook.ScreenshotsHook
 import com.houvven.guise.xposed.hook.UniquelyIdHook
 import com.houvven.guise.xposed.hook.location.CellLocationHook
 import com.houvven.guise.xposed.hook.location.LocationHook
+import com.houvven.guise.xposed.hook.location.log
 import com.houvven.guise.xposed.hook.netowork.NetworkHook
 import com.houvven.guise.xposed.other.BlankPass
 import com.houvven.guise.xposed.other.HookSuccessHint
@@ -26,6 +27,13 @@ class HookInit : HookLoadPackageHandler {
     override val packageName = BuildConfig.APPLICATION_ID
 
     override fun loadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
+        if (lpparam.processName != lpparam.packageName
+            && !lpparam.processName.startsWith("${lpparam.packageName}:")
+            && !lpparam.isFirstApplication) {
+            // Avoid multi-hooking within one process
+            XposedLogger.i("skip loadPackage: pkg=${lpparam.packageName} firstApp=${lpparam.isFirstApplication}")
+            return
+        }
 
         XposedLogger.i("start loadPackage: ${lpparam.packageName} [${lpparam.appInfo.name}]")
         PackageConfig.doRefresh(lpparam.packageName)
