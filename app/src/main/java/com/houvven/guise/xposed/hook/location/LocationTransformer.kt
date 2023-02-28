@@ -24,7 +24,21 @@ internal inline fun logw(text: String, logToXposed: Boolean = true) {
     }
 }
 
-private val mGcj02Holder by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { LinkedHashSet<Int>() }
+private val mGcj02Holder by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    return@lazy object : LinkedHashSet<Int>() {
+        val limit = 50
+        override fun add(element: Int): Boolean {
+            val add = super.add(element)
+            if (add && size >= limit) {
+                iterator().apply {
+                    next()
+                    remove()
+                }
+            }
+            return add
+        }
+    }
+}
 internal fun Location.isFakeLocation() = extras != null && extras!!.getBoolean("isFake", false)
 internal fun Location.isGcj02Location(): Boolean {
     synchronized (mGcj02Holder) {
@@ -153,12 +167,6 @@ internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
             // provider = "${provider}@gcj02"
             synchronized(mGcj02Holder) {
                 mGcj02Holder.add(hashCode())
-                val overHeat = 100
-                if (mGcj02Holder.size >= overHeat) {
-                    val copy = ArrayList(mGcj02Holder)
-                    mGcj02Holder.clear()
-                    mGcj02Holder.addAll(copy.subList(copy.size - overHeat/2, copy.size - 1))
-                }
             }
         }
     }
