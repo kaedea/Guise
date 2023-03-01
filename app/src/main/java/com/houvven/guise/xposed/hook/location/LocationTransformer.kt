@@ -4,6 +4,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import com.houvven.ktx_xposed.logger.logcat
 import com.houvven.ktx_xposed.logger.logcatInfo
 import java.util.*
@@ -181,7 +182,13 @@ internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
                 }
                 return@bundle bundle
             })
+            if (provider == LocationManager.GPS_PROVIDER || provider == LocationManager.NETWORK_PROVIDER) {
+                accuracy = 1f
+            }
             // provider = "${provider}@gcj02"
+            // time = System.currentTimeMillis()
+            // elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+            // set(Location(this))
             synchronized(mGcj02Holder) {
                 mGcj02Holder.add(myHashcode())
             }

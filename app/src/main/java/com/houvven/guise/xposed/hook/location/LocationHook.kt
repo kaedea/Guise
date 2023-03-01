@@ -399,8 +399,6 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                     if (keepAsLastLatLng) {
                         updateLastLatLng(latLng).setTimes(location.time, location.elapsedRealtimeNanos)
                     }
-                    // it.time = System.currentTimeMillis()
-                    // it.elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
                 }
             }
         }

@@ -25,11 +25,11 @@ class HookInit : HookLoadPackageHandler {
             && !lpparam.processName.startsWith("${lpparam.packageName}:")
             && !lpparam.isFirstApplication) {
             // Avoid multi-hooking within one process
-            XposedLogger.i("skip loadPackage: pkg=${lpparam.packageName} firstApp=${lpparam.isFirstApplication}")
+            XposedLogger.i("skip loadPackage: proc=${lpparam.processName}, pkg=${lpparam.packageName}[${lpparam.appInfo.name}], firstApp=${lpparam.isFirstApplication}")
             return
         }
 
-        XposedLogger.i("start loadPackage: ${lpparam.packageName} [${lpparam.appInfo.name}]")
+        XposedLogger.i("start loadPackage: proc=${lpparam.processName}, pkg=${lpparam.packageName}[${lpparam.appInfo.name}]")
         PackageConfig.doRefresh(lpparam.packageName)
         if (!packageConfig.isEnable) {
             XposedLogger.i("loadPackage: ${lpparam.packageName} is not enable, skip.")
