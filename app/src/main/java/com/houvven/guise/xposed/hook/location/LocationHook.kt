@@ -86,7 +86,7 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                     afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
                         (hookParam.thisObject as? Location)?.let { location ->
                             logcat {
-                                info("onMethodInvoke ${method.name}@${location.hashCode()}")
+                                info("onMethodInvoke ${method.name}@${location.myHashcode()}")
                                 info("\tfrom:")
                                 Throwable().stackTrace.forEach {
                                     info("\t\t$it")
@@ -94,41 +94,14 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                                 info("\t$location")
                                 info("\tprovider: ${location.provider}")
                             }
-                            val mode: String
-                            val lastLatLng = lastGcj02LatLng
-                            val old = hookParam.result
-                            if (!location.isGcj02Location()) {
-                                if (location.isTransformable()) {
-                                    mode = "transform"
-                                    location.wgs84ToGcj02()?.let {
-                                        location.safeSetLatLng(it)
-                                        updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
-                                        when (method.name) {
-                                            "getLatitude" -> hookParam.result = it.latitude
-                                            "getLongitude" -> hookParam.result = it.longitude
-                                        }
-                                    }
-                                } else {
-                                    if (location.isReliableFused(lastGcj02LatLng)) {
-                                        mode = "fused"
-                                        location.safeGetLatLng()?.let {
-                                            updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
-                                        }
-                                    } else {
-                                        var refineLatLng = location.tryReverseTransform(lastGcj02LatLng)
-                                        if (refineLatLng != null) {
-                                            mode = "reverse"
-                                        } else {
-                                            // Try pass by the last gcj-02 location
-                                            if (lastGcj02LatLng != null &&
-                                                location.elapsedRealtimeNanos - lastGcj02LatLng!!.elapsedRealtimeNanos in 0..10 * 1000000L) { // 10s
-                                                mode = "cache"
-                                                refineLatLng = lastGcj02LatLng
-                                            } else {
-                                                mode = "unknown"
-                                            }
-                                        }
-                                        refineLatLng?.let {
+                            synchronized(location) {
+                                val mode: String
+                                val lastLatLng = lastGcj02LatLng
+                                val old = hookParam.result
+                                if (!location.isGcj02Location()) {
+                                    if (location.isTransformable()) {
+                                        mode = "transform"
+                                        location.wgs84ToGcj02()?.let {
                                             location.safeSetLatLng(it)
                                             updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
                                             when (method.name) {
@@ -136,15 +109,46 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
                                                 "getLongitude" -> hookParam.result = it.longitude
                                             }
                                         }
+                                    } else {
+                                        if (location.isReliableFused(lastGcj02LatLng)) {
+                                            mode = "fused"
+                                            location.safeGetLatLng()?.let {
+                                                updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
+                                            }
+                                        } else {
+                                            var refineLatLng = location.tryReverseTransform(lastGcj02LatLng)
+                                            if (refineLatLng != null) {
+                                                mode = "reverse"
+                                            } else {
+                                                // Try pass by the last gcj-02 location
+                                                if (lastGcj02LatLng != null &&
+                                                    Math.abs(location.elapsedRealtimeNanos - lastGcj02LatLng!!.elapsedRealtimeNanos) in 0..10 * 1000000L) { // 10s
+                                                    mode = "cache"
+                                                    refineLatLng = lastGcj02LatLng
+                                                } else {
+                                                    logcatInfo { "\ttime ago: ${location.elapsedRealtimeNanos} - ${lastGcj02LatLng?.elapsedRealtimeNanos} = " +
+                                                            "${(location.elapsedRealtimeNanos - (lastGcj02LatLng?.elapsedRealtimeNanos ?: 0)) / (10 * 1000000L) } s" }
+                                                    mode = "unknown"
+                                                }
+                                            }
+                                            refineLatLng?.let {
+                                                location.safeSetLatLng(it)
+                                                updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
+                                                when (method.name) {
+                                                    "getLatitude" -> hookParam.result = it.latitude
+                                                    "getLongitude" -> hookParam.result = it.longitude
+                                                }
+                                            }
+                                        }
                                     }
+                                } else {
+                                    mode = "gcj-02"
                                 }
-                            } else {
-                                mode = "gcj-02"
-                            }
-                            logcat {
-                                info("\tmode: $mode")
-                                info("\tlast: [${lastLatLng?.latitude}, ${lastLatLng?.longitude}]")
-                                info("\t${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
+                                logcat {
+                                    info("\tmode: $mode")
+                                    info("\tlast: [${lastLatLng?.latitude}, ${lastLatLng?.longitude}]")
+                                    info("\t${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
+                                }
                             }
                         }
                     }
@@ -377,25 +381,27 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
 
     @Suppress("SameParameterValue")
     private fun modifyLocationToGcj02(location: Location, keepAsLastLatLng: Boolean = true): Location {
-        logcatInfo { "modifyLocationToGcj02: $location" }
+        logcatInfo { "modifyLocationToGcj02@${location.myHashcode()}: \n\t$location" }
         if (!isFixGoogleMapDriftMode) {
             throw IllegalStateException("isFixGoogleMapDriftMode=${isFixGoogleMapDriftMode}")
         }
-        return location.also {
-            if (it.isGcj02Location()) {
-                logcatInfo { "\tisGcj02Location: true" }
-                return@also
-            }
-            if (!location.isTransformable()) {
-                logcatInfo { "\tisTransformable: false" }
-                return@also
-            }
-            it.wgs84ToGcj02()?.let { latLng ->
-                if (keepAsLastLatLng) {
-                    updateLastLatLng(latLng).setTimes(location.time, location.elapsedRealtimeNanos)
+        synchronized(location) {
+            return location.also {
+                if (it.isGcj02Location()) {
+                    logcatInfo { "\tisGcj02Location: true" }
+                    return@also
                 }
-                it.time = System.currentTimeMillis()
-                it.elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+                if (!location.isTransformable()) {
+                    logcatInfo { "\tisTransformable: false" }
+                    return@also
+                }
+                it.wgs84ToGcj02()?.let { latLng ->
+                    if (keepAsLastLatLng) {
+                        updateLastLatLng(latLng).setTimes(location.time, location.elapsedRealtimeNanos)
+                    }
+                    // it.time = System.currentTimeMillis()
+                    // it.elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+                }
             }
         }
     }
