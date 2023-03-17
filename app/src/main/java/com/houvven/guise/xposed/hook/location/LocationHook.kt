@@ -11,6 +11,7 @@ import com.houvven.ktx_xposed.hook.*
 import com.houvven.ktx_xposed.logger.logcat
 import com.houvven.ktx_xposed.logger.logcatInfo
 import com.houvven.ktx_xposed.logger.logcatWarn
+import de.robv.android.xposed.XposedBridge
 
 
 @Suppress("DEPRECATION")
@@ -34,6 +35,7 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
 
     private val isFakeLocationMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { config.latitude != -1.0 && config.longitude != -1.0 && !isFixGoogleMapDriftMode }
     private val isFixGoogleMapDriftMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { config.fixGoogleMapDrift }
+    private val listenerHolder: MutableMap<Int, LocationListener> by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { hashMapOf() }
 
     override fun onHook() {
         logcat {
@@ -68,6 +70,7 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
             hookGpsStatusListener()
         }
         if (isFixGoogleMapDriftMode) {
+            // removeNmeaListener()
         }
     }
 
@@ -267,7 +270,7 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
     private fun hookLocationUpdate() {
         val requestLocationUpdates = "requestLocationUpdates"
         val requestSingleUpdate = "requestSingleUpdate"
-        val getCurrentLocation = "getCurrentLocation"
+        val removeUpdates = "removeUpdates"
 
         if (isFakeLocationMode) {
             LocationManager::class.java.run {
@@ -289,65 +292,106 @@ class LocationHook : LoadPackageHandler, LocationHookBase() {
         } else if (isFixGoogleMapDriftMode) {
             LocationManager::class.java.run {
                 for (method in declaredMethods) {
-                    if (method.name != requestLocationUpdates && method.name != requestSingleUpdate && method.name != getCurrentLocation) {
-                        continue
-                    }
-                    val target = method.name
-                    val paramsTypes = method.parameterTypes
-                    val indexOf = method.parameterTypes.indexOf(LocationListener::class.java)
-                    if (indexOf == -1) {
-                        // Just intercept invocation right now
-                        // log("replace: $target($paramsTypes)")
-                        // replaceMethod(this, target, *paramsTypes) {
-                        //     log("replaceMethod $target $paramsTypes")
-                        // }
-                        continue
-                    } else {
-                        // Hook and modify location
-                        beforeHookedMethod(target, *paramsTypes) {
-                            logcatInfo { "onMethodInvoke $target, idx=$indexOf" }
-                            val listener = it.args[indexOf] as LocationListener
-                            val wrapper: LocationListener = object : LocationListener {
-                                override fun onLocationChanged(location: Location) {
-                                    logcatInfo { "onLocationChanged" }
-                                    listener.onLocationChanged(modifyLocationToGcj02(location, true))
-                                }
-
-                                override fun onLocationChanged(locations: List<Location>) {
-                                    logcatInfo { "onLocationChanged list: ${locations.size}" }
-                                    val fakeLocations = arrayListOf<Location>()
-                                    for (location in locations) {
-                                        fakeLocations.add(modifyLocationToGcj02(location, true))
-                                    }
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                        listener.onLocationChanged(fakeLocations)
+                    if (method.name == requestLocationUpdates || method.name == requestSingleUpdate || method.name == removeUpdates) {
+                        val target = method.name
+                        val paramsTypes = method.parameterTypes
+                        val indexOf = method.parameterTypes.indexOf(LocationListener::class.java)
+                        if (indexOf == -1) {
+                            // Just intercept invocation right now
+                            // log("replace: $target($paramsTypes)")
+                            // replaceMethod(this, target, *paramsTypes) {
+                            //     log("replaceMethod $target $paramsTypes")
+                            // }
+                            continue
+                        } else {
+                            // Hook and modify location
+                            afterHookedMethod(target, *paramsTypes) { hookParam ->
+                                val listener = hookParam.args[indexOf] as LocationListener
+                                logcat {
+                                    info("onMethodInvoke $target, idx=$indexOf, listener=${listener.hashCode()}")
+                                    info("\tfrom:")
+                                    Throwable().stackTrace.forEach {
+                                        info("\t\t$it")
                                     }
                                 }
-
-                                override fun onFlushComplete(requestCode: Int) {
-                                    logcatInfo { "onFlushComplete" }
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                        listener.onFlushComplete(requestCode)
+                                when(method.name) {
+                                    requestLocationUpdates, requestSingleUpdate -> {
+                                        val wrapper = listenerHolder.getOrElse(listener.hashCode()) {
+                                            return@getOrElse object : LocationListener {
+                                                override fun onLocationChanged(location: Location) {
+                                                    logcatInfo { "onLocationChanged" }
+                                                    listener.onLocationChanged(modifyLocationToGcj02(location, true))
+                                                }
+                                                override fun onLocationChanged(locations: List<Location>) {
+                                                    logcatInfo { "onLocationChanged list: ${locations.size}" }
+                                                    val fakeLocations = arrayListOf<Location>()
+                                                    for (location in locations) {
+                                                        fakeLocations.add(modifyLocationToGcj02(location, true))
+                                                    }
+                                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                                        listener.onLocationChanged(fakeLocations)
+                                                    }
+                                                }
+                                                override fun onFlushComplete(requestCode: Int) {
+                                                    logcatInfo { "onFlushComplete" }
+                                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                                        listener.onFlushComplete(requestCode)
+                                                    }
+                                                }
+                                                override fun onStatusChanged(provider: String, status: Int, extras: Bundle) {
+                                                    logcatInfo { "onStatusChanged: provider=$provider, status=$status" }
+                                                    listener.onStatusChanged(provider, status, extras)
+                                                }
+                                                override fun onProviderEnabled(provider: String) {
+                                                    logcatInfo { "onProviderEnabled" }
+                                                    listener.onProviderEnabled(provider)
+                                                }
+                                                override fun onProviderDisabled(provider: String) {
+                                                    logcatInfo { "onProviderDisabled" }
+                                                    listener.onProviderDisabled(provider)
+                                                }
+                                            }
+                                        }
+                                        if (method.name != requestSingleUpdate) {
+                                            synchronized(listenerHolder) {
+                                                listenerHolder[listener.hashCode()] = wrapper
+                                            }
+                                        }
+                                        logcatInfo { "\tadd origin(${listener.hashCode()})>>wrapper(${wrapper.hashCode()}), size=${listenerHolder.size}" }
+                                        hookParam.args[indexOf] = wrapper
                                     }
-                                }
 
-                                override fun onStatusChanged(provider: String, status: Int, extras: Bundle) {
-                                    logcatInfo { "onStatusChanged: provider=$provider, status=$status" }
-                                    listener.onStatusChanged(provider, status, extras)
-                                }
-
-                                override fun onProviderEnabled(provider: String) {
-                                    logcatInfo { "onProviderEnabled" }
-                                    listener.onProviderEnabled(provider)
-                                }
-
-                                override fun onProviderDisabled(provider: String) {
-                                    logcatInfo { "onProviderDisabled" }
-                                    listener.onProviderDisabled(provider)
+                                    removeUpdates -> {
+                                        synchronized(listenerHolder) {
+                                            logcatInfo { "\tlistenerHolder: $listenerHolder" }
+                                            listenerHolder[listener.hashCode()]?.let {
+                                                hookParam.args[indexOf] = it
+                                            }
+                                            val hashcodeToBeRemoved = mutableListOf<Int>()
+                                            var next = listener.hashCode()
+                                            while (listenerHolder.containsKey(next)) {
+                                                hashcodeToBeRemoved.add(next)
+                                                next = listenerHolder[next].hashCode()
+                                            }
+                                            hashcodeToBeRemoved.forEach { hashcode ->
+                                                listenerHolder.remove(hashcode)?.let { wrapper ->
+                                                    logcatInfo { "\tremove origin($hashcode)>>wrapper(${wrapper.hashCode()}), size=${listenerHolder.size}" }
+                                                    if (hashcode != listener.hashCode()) {
+                                                        XposedBridge.invokeOriginalMethod(hookParam.method, hookParam.thisObject, arrayOf(wrapper))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                            it.args[indexOf] = wrapper
                         }
+                    } else {
+                        // val target = method.name
+                        // val paramsTypes = method.parameterTypes
+                        // afterHookedMethod(target, *paramsTypes) { hookParam ->
+                        //     logcatInfo { "onMethodInvoke LocationManager#$target" }
+                        // }
                     }
                 }
             }

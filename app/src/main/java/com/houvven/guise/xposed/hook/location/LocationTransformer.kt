@@ -182,10 +182,10 @@ internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
                 }
                 return@bundle bundle
             })
-            if (provider == LocationManager.GPS_PROVIDER || provider == LocationManager.NETWORK_PROVIDER) {
-                accuracy = 1f
-            }
-            // provider = "${provider}@gcj02"
+            // if (provider in listOf(LocationManager.GPS_PROVIDER)) {
+            //     accuracy = 10.0f
+            // }
+            // // provider = "${provider}@gcj02"
             // time = System.currentTimeMillis()
             // elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
             // set(Location(this))
