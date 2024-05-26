@@ -5,6 +5,7 @@ import com.houvven.guise.xposed.config.ModuleConfig
 import com.houvven.guise.xposed.hook.*
 import com.houvven.guise.xposed.hook.location.CellLocationHook
 import com.houvven.guise.xposed.hook.location.LocationHook
+import com.houvven.guise.xposed.hook.location.MediaLocationHook
 import com.houvven.guise.xposed.hook.netowork.NetworkHook
 import com.houvven.guise.xposed.other.BlankPass
 import com.houvven.guise.xposed.other.HookSuccessHint
@@ -42,6 +43,7 @@ class HookInit : HookLoadPackageHandler {
             LocalHook(),
             LocationHook(),
             CellLocationHook(),
+            MediaLocationHook(),
             NetworkHook(),
             OsBuildHook(),
             ScreenshotsHook(),
