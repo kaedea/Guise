@@ -38,7 +38,8 @@
     <string name="location_lng">经度</string>
     <string name="location_lat">纬度</string>
     <string name="location_offset">随机偏移</string>
-    <string name="location_fix_gogle_map_drift">修谷歌地图偏移</string>
+    <string name="location_fix_gogle_map_drift">修复谷歌地图偏移</string>
+    <string name="location_fix_media_drift">修复媒体文件位置信息偏移</string>
     <string name="location_wifi_fail">使WiFi位置信息失效</string>
     <string name="other_battery_level">电量</string>
     <string name="other_language">语言</string>

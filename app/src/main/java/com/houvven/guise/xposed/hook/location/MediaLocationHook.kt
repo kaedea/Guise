@@ -18,12 +18,12 @@ import java.util.*
  * @since  2024-05-22
  */
 class MediaLocationHook : LoadPackageHandler {
-    private val isFixGoogleMapDriftMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { config.fixGoogleMapDrift }
+    private val isFixGoogleMapDriftMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { config.fixGoogleMapDrift && config.fixMediaLocationDrift }
     private val lookUpAndroidxSet: MutableSet<Unhook> by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { hashSetOf() }
 
     override fun onHook() {
         logcat {
-            info("onHook config: latitude=${config.latitude}, longitude=${config.longitude}, fixGoogleMapDrift=${config.fixGoogleMapDrift}")
+            info("onHook config: latitude=${config.latitude}, longitude=${config.longitude}, fixGoogleMapDrift=${config.fixGoogleMapDrift}, fixMediaLocationDrift=${config.fixMediaLocationDrift}")
             info("\tfrom:")
             Throwable().stackTrace.forEach {
                 info("\t\t$it")

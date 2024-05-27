@@ -34,6 +34,7 @@ data class ModuleConfig(
     var latitude: Double = -1.0,
     var randomOffset: Boolean = false,
     var fixGoogleMapDrift: Boolean = false,
+    var fixMediaLocationDrift: Boolean = false,
     var makeWifiLocationFail: Boolean = false,
     var makeCellLocationFail: Boolean = false,
 
