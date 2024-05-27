@@ -4,11 +4,9 @@ import android.database.Cursor
 import android.media.ExifInterface
 import android.media.MediaMetadataRetriever
 import android.provider.MediaStore
-import android.util.Log
 import com.houvven.guise.xposed.LoadPackageHandler
 import com.houvven.ktx_xposed.hook.afterHookAllConstructors
 import com.houvven.ktx_xposed.hook.afterHookedMethod
-import com.houvven.ktx_xposed.logger.XposedLogger.TAG
 import com.houvven.ktx_xposed.logger.logcat
 import de.robv.android.xposed.XC_MethodHook.Unhook
 import java.io.BufferedInputStream
@@ -32,7 +30,9 @@ class MediaLocationHook : LoadPackageHandler {
             }
         }
         if (isFixGoogleMapDriftMode) {
-            Log.i(TAG, "hookMediaLocation for pkg: ${config.packageName}")
+            logcat {
+                info("hookMediaLocation for pkg: ${config.packageName}")
+            }
             hookMediaLocation()
         }
     }
@@ -58,114 +58,102 @@ class MediaLocationHook : LoadPackageHandler {
         }
         try {
             androidx.exifinterface.media.ExifInterface::class.java.run {
-                Log.i(TAG, "list androidx ExifInterface: $declaredMethods")
                 for (method in declaredMethods) {
-                    Log.i(TAG, "list androidx ExifInterface: $method")
                     if (method.name == "getLatLong") {
                         hookExifInterfaceGetLatLongMethod(this, method)
                     }
                 }
             }
-            Log.i(TAG, "hookAndroidxExifInterface done")
         } catch (e: Throwable) {
-            Log.i(TAG, "hookAndroidxExifInterfaceErr: $e")
+            logcat {
+                error("hookAndroidxExifInterfaceErr: $e")
+            }
             lookUpAndroidXExifInterface()
         }
-
     }
 
     private fun lookUpAndroidXExifInterface() {
-        Log.i(TAG, "lookUpAndroidXExifInterface by BufferedInputStream")
-        try {
-            BufferedInputStream::class.java.afterHookAllConstructors { hookParam ->
-                    synchronized(this) {
-                        if (lookUpAndroidxSet.isNotEmpty()) {
-                            Log.i(TAG, "onCreateBufferedInputStream: " +
-                                    "${hookParam.method}, args=${hookParam.args?.joinToString { it?.toString() ?: "null" }}")
-                            val stackTrace = Throwable().stackTrace
-                            val caller = run {
-                                var callerIndex = 0
-                                stackTrace.forEachIndexed { index, it ->
-                                    if (it.className == "LSPHooker_" && it.methodName == "constructor") {
-                                        callerIndex = index + 1
-                                        return@forEachIndexed
-                                    }
+        BufferedInputStream::class.java.afterHookAllConstructors { hookParam ->
+                synchronized(this) {
+                    if (lookUpAndroidxSet.isNotEmpty()) {
+                        logcat {
+                            info("onCreateBufferedInputStream: ${hookParam.method}, args=${hookParam.args?.joinToString { it?.toString() ?: "null" }}")
+                        }
+                        val stackTrace = Throwable().stackTrace
+                        val caller = run {
+                            var callerIndex = 0
+                            stackTrace.forEachIndexed { index, it ->
+                                if (it.className == "LSPHooker_" && it.methodName == "constructor") {
+                                    callerIndex = index + 1
+                                    return@forEachIndexed
                                 }
-                                return@run if (callerIndex >= 0) stackTrace[callerIndex] else null
-                            }.also {
-                                if (it != null
-                                    && !it.className.startsWith("android.")
-                                    && !it.className.startsWith("com.android.")) {
-                                    Log.i(TAG, "\tfrom:")
-                                    stackTrace.forEach {
-                                        Log.i(TAG, "\t\t$it")
-                                    }
-                                }
-                                Log.i(TAG, "\tcaller: $it")
                             }
-                            try {
-                                val callerClass = Class.forName(
-                                    caller!!.className,
-                                    true,
-                                    Thread.currentThread().contextClassLoader
-                                )
-                                Log.i(TAG, "\tcallerClass: $callerClass")
-                                val getLatLngMethod1 =
-                                    callerClass.declaredMethods.find { it.parameters.isEmpty() && it.returnType == DoubleArray::class.java }
-                                val getLatLngMethod2 =
-                                    callerClass.declaredMethods.find { it.parameters.size == 1 && it.parameters[0].type == FloatArray::class.java && it.returnType == Boolean::class.java }
-                                Log.i(TAG, "\tgetLatLngMethod1: $getLatLngMethod1")
-                                Log.i(TAG, "\tgetLatLngMethod2: $getLatLngMethod2")
-
-                                if (getLatLngMethod1 != null) {
-                                    val getLatLngMethod3 =
-                                        callerClass.methods.find { it.parameters.size == 1 && it.parameters[0].type == FloatArray::class.java && it.returnType == Boolean::class.java }
-                                    Log.i(TAG, "\tgetLatLngMethod3: $getLatLngMethod3")
-                                    Log.i(TAG, "\tdump class methods:")
-                                    callerClass.declaredMethods.forEach {
-                                        Log.i(TAG, "\t\t$it")
-                                    }
-                                    try {
-                                        Log.i(TAG, "hookGetLatLongMethod1: $getLatLngMethod1")
-                                        hookExifInterfaceGetLatLongMethod(callerClass, getLatLngMethod1)
-                                        lookUpAndroidxSet.removeAll {
-                                            it.unhook()
-                                            return@removeAll true
-                                        }
-                                    } catch (e: Exception) {
-                                        Log.i(TAG, "hookGetLatLongMethod1Err: $e")
+                            return@run if (callerIndex >= 0) stackTrace[callerIndex] else null
+                        }.also {
+                            if (it != null
+                                && !it.className.startsWith("android.")
+                                && !it.className.startsWith("com.android.")) {
+                                logcat {
+                                    info("\tfrom:")
+                                    stackTrace.forEach {
+                                        info("\t\t$it")
                                     }
                                 }
-                            } catch (e: Exception) {
-                                Log.i(TAG, "getCallerClassErr: $e")
+                            }
+                            logcat {
+                                info("\tcaller: $it")
+                            }
+                        }
+                        try {
+                            val callerClass = Class.forName(caller!!.className, true, Thread.currentThread().contextClassLoader)
+                            logcat {
+                                info("\tcallerClass: $callerClass")
+                            }
+                            val getLatLngMethod1 = callerClass.declaredMethods.find { it.parameters.isEmpty() && it.returnType == DoubleArray::class.java }
+                            val getLatLngMethod2 = callerClass.declaredMethods.find { it.parameters.size == 1 && it.parameters[0].type == FloatArray::class.java && it.returnType == Boolean::class.java }
+                            logcat {
+                                info("\tgetLatLngMethod1: $getLatLngMethod1")
+                                info("\tgetLatLngMethod2: $getLatLngMethod2")
+                            }
+
+                            if (getLatLngMethod1 != null) {
+                                val getLatLngMethod3 = callerClass.methods.find { it.parameters.size == 1 && it.parameters[0].type == FloatArray::class.java && it.returnType == Boolean::class.java }
+                                logcat {
+                                    info("\tgetLatLngMethod3: $getLatLngMethod3")
+                                    info("\tdump class methods:")
+                                    callerClass.declaredMethods.forEach {
+                                        info("\t\t$it")
+
+                                    }
+                                }
+                                try {
+                                    logcat {
+                                        info("hookGetLatLongMethod1: $getLatLngMethod1")
+                                    }
+                                    hookExifInterfaceGetLatLongMethod(callerClass, getLatLngMethod1)
+                                    lookUpAndroidxSet.removeAll {
+                                        it.unhook()
+                                        return@removeAll true
+                                    }
+                                } catch (e: Exception) {
+                                    logcat {
+                                        error("hookGetLatLongMethod1Err: $e")
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            logcat {
+                                error("getCallerClassErr: $e")
                             }
                         }
                     }
-                }.forEach { unHook ->
-                lookUpAndroidxSet.add(unHook)
-            }
-            Log.i(TAG, "hookBufferedInputStream done")
-        } catch (e: Exception) {
-            Log.i(TAG, "hookBufferedInputStream: $e")
-        }
-    }
-
-    private fun tryMediaMetadataRetriever() {
-        MediaMetadataRetriever::class.java.run {
-            for (method in declaredMethods) {
-                if (method.name == "extractMetadata" && method.returnType == String::class.java) {
-                    if (method.parameters.size == 1 && method.parameters[0].type == Int::class.java) {
-                        hookExtractMetadataMethod(this, method)
-                        break
-                    }
                 }
-            }
+            }.forEach { unHook ->
+            lookUpAndroidxSet.add(unHook)
         }
-        Log.i(TAG, "hook MediaMetadataRetriever done")
     }
 
     private fun hookExifInterfaceGetLatLongMethod(clazz: Class<*>, method: Method) {
-        Log.i(TAG, "hookGetLatLongMethod: $method")
         val target = method.name
         val paramsTypes = method.parameterTypes
         clazz.afterHookedMethod(target, *paramsTypes) { hookParam ->
@@ -200,8 +188,20 @@ class MediaLocationHook : LoadPackageHandler {
         }
     }
 
+    private fun tryMediaMetadataRetriever() {
+        MediaMetadataRetriever::class.java.run {
+            for (method in declaredMethods) {
+                if (method.name == "extractMetadata" && method.returnType == String::class.java) {
+                    if (method.parameters.size == 1 && method.parameters[0].type == Int::class.java) {
+                        hookExtractMetadataMethod(this, method)
+                        break
+                    }
+                }
+            }
+        }
+    }
+
     private fun hookExtractMetadataMethod(clazz: Class<*>, method: Method) {
-        Log.i(TAG, "hookExtractMetadataMethod: $method")
         val target = method.name
         val paramsTypes = method.parameterTypes
         clazz.afterHookedMethod(target, *paramsTypes) { hookParam ->
@@ -255,12 +255,10 @@ class MediaLocationHook : LoadPackageHandler {
                 }
             }
         }
-        Log.i(TAG, "hook Cursor done")
     }
 
     @Suppress("KotlinConstantConditions")
     private fun hookCursorGetDoubleMethod(clazz: Class<*>, method: Method) {
-        Log.i(TAG, "hookCursorGetDoubleMethod: $method")
         val target = method.name
         val paramsTypes = method.parameterTypes
         clazz.afterHookedMethod(target, *paramsTypes) { hookParam ->
