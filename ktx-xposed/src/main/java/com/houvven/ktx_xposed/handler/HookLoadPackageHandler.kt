@@ -26,8 +26,8 @@ interface HookLoadPackageHandler : IXposedHookLoadPackage {
 
     fun loadPackage(lpparam: LoadPackageParam)
 
-    fun doHookLoadPackage(hooks: List<LoadPackageHookAdapter>) =
-        hooks.forEach { runXposedCatching { it.onHook() } }
+    fun doHookLoadPackage(lpparam: LoadPackageParam, hooks: List<LoadPackageHookAdapter>) =
+        hooks.forEach { runXposedCatching { it.onHook(lpparam) } }
 
     fun doActivate() {
         val name = HookStatus.Companion::class.java.name

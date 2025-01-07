@@ -8,7 +8,9 @@ import com.houvven.guise.xposed.LoadPackageHandler
 import com.houvven.ktx_xposed.hook.afterHookAllConstructors
 import com.houvven.ktx_xposed.hook.afterHookedMethod
 import com.houvven.ktx_xposed.logger.logcat
+import com.houvven.ktx_xposed.logger.logcatWarn
 import de.robv.android.xposed.XC_MethodHook.Unhook
+import de.robv.android.xposed.callbacks.XC_LoadPackage
 import java.io.BufferedInputStream
 import java.lang.reflect.Method
 import java.util.*
@@ -18,23 +20,54 @@ import java.util.*
  * @since  2024-05-22
  */
 class MediaLocationHook : LoadPackageHandler {
-    private val isFixGoogleMapDriftMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { config.fixGoogleMapDrift && config.fixMediaLocationDrift }
+    companion object {
+        private const val TAG = "MediaLocationHook"
+    }
+
+    @Volatile private var hasInit = false
     private val lookUpAndroidxSet: MutableSet<Unhook> by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { hashSetOf() }
 
     override fun onHook() {
+        error("Deprecated")
+    }
+
+    override fun onHook(lpparam: XC_LoadPackage.LoadPackageParam) {
+        synchronized(this) {
+            if (hasInit) {
+                logcat {
+                    error("${TAG}#onHook: already init!")
+                    error("\tloadPackage: proc=${lpparam.processName}, pkg=${lpparam.packageName}[${lpparam.appInfo.name}], firstApp=${lpparam.isFirstApplication}")
+                    error("\tfrom:")
+                    Throwable().stackTrace.forEach {
+                        error("\t\t$it")
+                    }
+                }
+            } else {
+                logcat {
+                    info("${TAG}#onHook: latitude=${config.latitude}, longitude=${config.longitude}, fixGoogleMapDrift=${config.fixGoogleMapDrift}, fixMediaLocationDrift=${config.fixMediaLocationDrift}")
+                    info("\tloadPackage: proc=${lpparam.processName}, pkg=${lpparam.packageName}[${lpparam.appInfo.name}], firstApp=${lpparam.isFirstApplication}")
+                    info("\tfrom:")
+                    Throwable().stackTrace.forEach {
+                        info("\t\t$it")
+                    }
+                }
+                if (!config.fixGoogleMapDrift || !config.fixMediaLocationDrift) {
+                    // Disabled
+                    logcatWarn { "${TAG}#disabled" }
+                } else {
+                    // Enabled
+                    init()
+                    hasInit = true
+                }
+            }
+        }
+    }
+
+    private fun init() {
         logcat {
-            info("onHook config: latitude=${config.latitude}, longitude=${config.longitude}, fixGoogleMapDrift=${config.fixGoogleMapDrift}, fixMediaLocationDrift=${config.fixMediaLocationDrift}")
-            info("\tfrom:")
-            Throwable().stackTrace.forEach {
-                info("\t\t$it")
-            }
+            info("hookMediaLocation for pkg: ${config.packageName}")
         }
-        if (isFixGoogleMapDriftMode) {
-            logcat {
-                info("hookMediaLocation for pkg: ${config.packageName}")
-            }
-            hookMediaLocation()
-        }
+        hookMediaLocation()
     }
 
     private fun hookMediaLocation() {

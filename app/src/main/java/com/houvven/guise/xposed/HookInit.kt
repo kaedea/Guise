@@ -50,7 +50,7 @@ class HookInit : HookLoadPackageHandler {
             UniquelyIdHook(),
             BlankPass(),
             BuildConfigHook()
-        ).let { doHookLoadPackage(it) }
+        ).let { doHookLoadPackage(lpparam, it) }
     }
 
 }
