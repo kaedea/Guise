@@ -15,6 +15,8 @@ import kotlin.collections.LinkedHashSet
  * @since  21/2/2023
  */
 
+private const val CHECK_FUSE_RELIABLE = false
+
 private val mGcj02Holder by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     return@lazy object : LinkedHashSet<Int>() {
         val limit = 100
@@ -69,6 +71,9 @@ internal fun Location.isTransformable(): Boolean {
 
 internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null): Boolean {
     logcatInfo { "isReliableFused: last=$lastLatLng" }
+    if (!CHECK_FUSE_RELIABLE) {
+        return true
+    }
     var reliable = false
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && provider == LocationManager.FUSED_PROVIDER) {
         // Fused Location might has been transformed twice: We transformed it and then GMS did it again
