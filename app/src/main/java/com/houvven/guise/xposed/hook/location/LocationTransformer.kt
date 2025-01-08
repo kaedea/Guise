@@ -15,8 +15,6 @@ import kotlin.collections.LinkedHashSet
  * @since  21/2/2023
  */
 
-private const val CHECK_FUSE_RELIABLE = false
-
 private val mGcj02Holder by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     return@lazy object : LinkedHashSet<Int>() {
         val limit = 100

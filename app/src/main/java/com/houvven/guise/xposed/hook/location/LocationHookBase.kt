@@ -1,60 +1,27 @@
 package com.houvven.guise.xposed.hook.location
 
-import android.location.Criteria
-import android.location.LocationManager
+import android.location.*
 import android.net.wifi.ScanResult
 import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.os.Build
-import android.os.UserHandle
 import android.telephony.PhoneStateListener
 import android.telephony.TelephonyManager
 import android.telephony.TelephonyManager.INCLUDE_LOCATION_DATA_NONE
 import android.telephony.gsm.GsmCellLocation
-import com.houvven.ktx_xposed.hook.beforeHookSomeSameNameMethod
-import com.houvven.ktx_xposed.hook.setMethodResult
-import com.houvven.ktx_xposed.hook.setSomeSameNameMethodResult
+import com.houvven.guise.xposed.config.ModuleConfig
+import com.houvven.ktx_xposed.hook.*
+
+
+internal const val HOOK_LOCATION_LISTENER = true
+internal const val CHECK_FUSE_RELIABLE = false
 
 @Suppress("DEPRECATION")
-open class LocationHookBase {
+abstract class LocationHookBase(open val config: ModuleConfig) {
 
-    protected fun setOtherServicesFail() {
-        setProviderState()
-        setTelLocationFail()
-    }
+    abstract fun start()
 
-    private fun setProviderState() {
-        LocationManager::class.java.apply {
-            setMethodResult(
-                methodName = "isLocationEnabledForUser",
-                value = true,
-                parameterTypes = arrayOf(UserHandle::class.java)
-            )
-            beforeHookSomeSameNameMethod(
-                "isProviderEnabledForUser", "hasProvider"
-            ) {
-                when (it.args[0] as String) {
-                    LocationManager.GPS_PROVIDER -> it.result = true
-                    LocationManager.FUSED_PROVIDER,
-                    LocationManager.NETWORK_PROVIDER,
-                    LocationManager.PASSIVE_PROVIDER,
-                    -> it.result = false
-                }
-            }
-            setSomeSameNameMethodResult(
-                "getProviders", "getAllProviders",
-                value = listOf(LocationManager.GPS_PROVIDER)
-            )
-            setMethodResult(
-                methodName = "getBestProvider",
-                value = LocationManager.GPS_PROVIDER,
-                parameterTypes = arrayOf(Criteria::class.java, Boolean::class.java)
-            )
-        }
-    }
-
-
-    private fun setTelLocationFail() {
+    protected fun makeTelLocationFail() {
         TelephonyManager::class.java.run {
             setSomeSameNameMethodResult(
                 "getCellLocation",
@@ -100,5 +67,7 @@ open class LocationHookBase {
         }
     }
 
-
+    protected fun removeNmeaListener() {
+        LocationManager::class.java.setAllMethodResult("addNmeaListener", false)
+    }
 }
