@@ -7,6 +7,8 @@ import android.os.Bundle
 import android.os.SystemClock
 import com.houvven.ktx_xposed.logger.logcat
 import com.houvven.ktx_xposed.logger.logcatInfo
+import de.robv.android.xposed.XposedBridge
+import de.robv.android.xposed.XposedHelpers
 import java.util.*
 import kotlin.collections.LinkedHashSet
 
@@ -208,9 +210,29 @@ internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
     return newLatLng
 }
 
+private val latitudeMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "getLatitude").also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
+private val longitudeMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "getLongitude").also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
 private val latitudeFiled by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     try {
-        return@lazy Location::class.java.getDeclaredField("mLatitudeDegrees").also {
+        return@lazy XposedHelpers.findFieldIfExists(Location::class.java, "mLatitudeDegrees").also {
             it.isAccessible = true
         }
     } catch (e: Exception) {
@@ -220,7 +242,7 @@ private val latitudeFiled by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
 
 private val longitudeField by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     try {
-        return@lazy Location::class.java.getDeclaredField("mLongitudeDegrees").also {
+        return@lazy XposedHelpers.findFieldIfExists(Location::class.java, "mLongitudeDegrees").also {
             it.isAccessible = true
         }
     } catch (e: Exception) {
@@ -230,7 +252,7 @@ private val longitudeField by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
 
 private val extrasField by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     try {
-        return@lazy Location::class.java.getDeclaredField("mExtras").also {
+        return@lazy XposedHelpers.findFieldIfExists(Location::class.java, "mExtras").also {
             it.isAccessible = true
         }
     } catch (e: Exception) {
@@ -242,6 +264,23 @@ private val extrasField by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
  * Avoid recursive hooking
  */
 internal fun Location.safeGetLatLng(): CoordTransform.LatLng? {
+    run {
+        if (latitudeMethod != null && longitudeMethod != null) {
+            val lat = XposedBridge.invokeOriginalMethod(
+                latitudeMethod,
+                this,
+                arrayOf()
+            ) as? Double
+            val lng = XposedBridge.invokeOriginalMethod(
+                longitudeMethod,
+                this,
+                arrayOf()
+            ) as? Double
+            if (lat != null && lng != null) {
+                return CoordTransform.LatLng(lat, lng)
+            }
+        }
+    }
     run {
         val lat = latitudeFiled?.get(this) as? Double
         val lng = longitudeField?.get(this) as? Double
@@ -290,7 +329,11 @@ internal fun Location.safeSetExtras(extras: Bundle) {
             this.extras!!.putAll(extras)
         }
     } else {
-        extrasField?.set(this, extras)
+        if (XposedHelpers.findFieldIfExists(javaClass, "mExtras") != null) {
+            XposedHelpers.setObjectField(this, "mExtras", extras)
+        } else {
+            extrasField?.set(this, extras)
+        }
     }
 }
 
