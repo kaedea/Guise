@@ -4,18 +4,29 @@ import android.location.Location
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
-import android.os.SystemClock
 import com.houvven.ktx_xposed.logger.logcat
 import com.houvven.ktx_xposed.logger.logcatInfo
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import java.util.*
-import kotlin.collections.LinkedHashSet
+import java.util.concurrent.Executors
 
 /**
  * @author Kaede
  * @since  21/2/2023
  */
+
+private const val BOUNDING_REFRESH_MS = 10 * 60 * 1000L
+private var mBoundingRef: Pair<Boolean, Long> = Pair(true, 0L)
+internal fun Location.checkIfBounded(): Boolean {
+    safeGetLatLng()?.let {
+        return ChinaMapBounding.isInMainland(it.latitude, it.longitude)
+                && !ChinaMapBounding.isInHongkong(it.latitude, it.longitude)
+                && !ChinaMapBounding.isInMacao(it.latitude, it.longitude)
+                && !ChinaMapBounding.isInTaiwan(it.latitude, it.longitude)
+    }
+    return false
+}
 
 private val mGcj02Holder by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     return@lazy object : LinkedHashSet<Int>() {
@@ -52,9 +63,15 @@ internal fun Location.isGcj02Location(): Boolean {
 }
 
 internal fun Location.shouldTransform(): Boolean {
-    return safeGetLatLng()?.let {
-        return@let CoordTransform.outOfChina(it.latitude, it.longitude)
-    } ?: false
+    val shouldRefreshing = mBoundingRef.second <= 0L || System.currentTimeMillis() - mBoundingRef.second >= BOUNDING_REFRESH_MS
+    if (shouldRefreshing) {
+        logcatInfo { "checkIfBounded: post" }
+        Executors.newCachedThreadPool().execute {
+            mBoundingRef = Pair(checkIfBounded(), System.currentTimeMillis())
+            logcatInfo { "checkIfBounded: done, bounded=${mBoundingRef.first}" }
+        }
+    }
+    return mBoundingRef.first
 }
 
 internal fun Location.isTransformable(): Boolean {

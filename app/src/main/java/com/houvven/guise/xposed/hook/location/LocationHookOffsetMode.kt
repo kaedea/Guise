@@ -74,14 +74,18 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                             val old = hookParam.result
                             if (!location.isGcj02Location()) {
                                 if (location.isTransformable()) {
-                                    mode = "transform"
-                                    location.wgs84ToGcj02()?.let {
-                                        location.safeSetLatLng(it)
-                                        updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
-                                        when (method.name) {
-                                            "getLatitude" -> hookParam.result = it.latitude
-                                            "getLongitude" -> hookParam.result = it.longitude
+                                    if (location.shouldTransform()) {
+                                        mode = "transform"
+                                        location.wgs84ToGcj02()?.let {
+                                            location.safeSetLatLng(it)
+                                            updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
+                                            when (method.name) {
+                                                "getLatitude" -> hookParam.result = it.latitude
+                                                "getLongitude" -> hookParam.result = it.longitude
+                                            }
                                         }
+                                    } else {
+                                        mode = "out-of-bounds"
                                     }
                                 } else {
                                     if (location.isReliableFused(lastGcj02LatLng)) {
@@ -313,6 +317,10 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                 }
                 if (!location.isTransformable()) {
                     logcatInfo { "\tisTransformable: false" }
+                    return@also
+                }
+                if (!location.shouldTransform()) {
+                    logcatInfo { "\tshouldTransform: false" }
                     return@also
                 }
                 it.wgs84ToGcj02()?.let { latLng ->
