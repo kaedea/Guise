@@ -8,7 +8,7 @@ import com.houvven.guise.xposed.config.ModuleConfig
 import com.houvven.ktx_xposed.hook.*
 import com.houvven.ktx_xposed.logger.logcatInfo
 
-class LocationHookFixMode(override val config: ModuleConfig) : LocationHookBase(config) {
+class LocationHookFakeMode(override val config: ModuleConfig) : LocationHookBase(config) {
     private var fakeLatitude = config.latitude
     private var fakeLongitude = config.longitude
 

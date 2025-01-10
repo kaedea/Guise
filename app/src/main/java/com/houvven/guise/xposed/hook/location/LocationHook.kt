@@ -19,7 +19,7 @@ class LocationHook : LoadPackageHandler {
 
     private val isFakeLocationMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { config.latitude != -1.0 && config.longitude != -1.0 && !isFixGoogleMapDriftMode }
     private val isFixGoogleMapDriftMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { config.fixGoogleMapDrift }
-    private val fixMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { LocationHookFixMode(config) }
+    private val fakeMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { LocationHookFakeMode(config) }
     private val offsetMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { LocationHookOffsetMode(config) }
 
     override fun onHook() {
@@ -60,7 +60,7 @@ class LocationHook : LoadPackageHandler {
 
     private fun init() {
         if (isFakeLocationMode) {
-            fixMode.start()
+            fakeMode.start()
         } else if (isFixGoogleMapDriftMode) {
             offsetMode.start()
         }
