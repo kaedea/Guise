@@ -204,6 +204,7 @@ internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
                 }
                 return@bundle bundle
             })
+
             // if (provider in listOf(LocationManager.GPS_PROVIDER)) {
             //     accuracy = 10.0f
             // }
@@ -211,6 +212,10 @@ internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
             // time = System.currentTimeMillis()
             // elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
             // set(Location(this))
+
+            val originProvider = safeGetProvider()
+            safeSetProvider("${originProvider}@gcj02")
+
             synchronized(mGcj02Holder) {
                 mGcj02Holder.add(myHashcode())
             }
