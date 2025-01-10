@@ -2,9 +2,13 @@ package com.houvven.ktx_xposed.logger
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.AndroidAppHelper
 import android.net.Uri
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import android.widget.Toast
 import androidx.core.content.contentValuesOf
 import com.houvven.ktx_xposed.BuildConfig
 import com.houvven.ktx_xposed.hook.afterHookedMethod
@@ -111,4 +115,20 @@ inline fun logcatWarn(tag: String = TAG, logToXposed: Boolean = false, block: ()
         return
     }
     XposedLogger.Wrapper(logToXposed).error(block(), tag)
+}
+
+inline fun toast(crossinline block: () -> String) {
+    if (!BuildConfig.DEBUG || AndroidAppHelper.currentApplication() == null) {
+        return
+    }
+    val toast = {
+        Toast.makeText(AndroidAppHelper.currentApplication(), block(), Toast.LENGTH_SHORT).show()
+    }
+    if (Looper.myLooper() == Looper.getMainLooper()) {
+        toast()
+    } else {
+        Handler(Looper.getMainLooper()).post {
+            toast()
+        }
+    }
 }

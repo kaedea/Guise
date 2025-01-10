@@ -1,17 +1,21 @@
 package com.houvven.guise.xposed.hook.location
 
+import android.location.Criteria
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.UserHandle
 import com.houvven.guise.xposed.config.ModuleConfig
-import com.houvven.ktx_xposed.hook.afterHookedMethod
-import com.houvven.ktx_xposed.hook.beforeHookedMethod
+import com.houvven.ktx_xposed.hook.*
 import com.houvven.ktx_xposed.logger.logcat
 import com.houvven.ktx_xposed.logger.logcatInfo
 import com.houvven.ktx_xposed.logger.logcatWarn
+import com.houvven.ktx_xposed.logger.toast
 import de.robv.android.xposed.XposedBridge
+import de.robv.android.xposed.XposedHelpers
+import java.util.Arrays
 
 class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBase(config) {
 
@@ -30,6 +34,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         hookGetLastLocation()
         if (HOOK_LOCATION_LISTENER) {
             hookLocationListener()
+            // hookILocationListenerOfSystemService()
         } else {
             hookLocationUpdateRequest()
         }
@@ -278,7 +283,13 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                         if (paramsTypes.first() == Location::class.java) {
                             // Hook and modify LocationListener#onLocationChanged(Location)
                             beforeHookedMethod(target, *paramsTypes) { hookParam ->
-                                logcatInfo { "onLocationChanged(Location)" }
+                                logcat {
+                                    info("onMethodInvoke ${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                    info("\tfrom:")
+                                    Throwable().stackTrace.forEach {
+                                        info("\t\t$it")
+                                    }
+                                }
                                 val originalLocation = hookParam.args[0] as? Location
                                 if (originalLocation != null) {
                                     hookParam.args[0] = modifyLocationToGcj02(originalLocation, true)
@@ -287,8 +298,14 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                         } else if (List::class.java.isAssignableFrom(paramsTypes.first())) {
                             // Hook and modify LocationListener#onLocationChanged(List<Location>)
                             beforeHookedMethod(target, *paramsTypes) { hookParam ->
+                                logcat {
+                                    info("onMethodInvoke ${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                    info("\tfrom:")
+                                    Throwable().stackTrace.forEach {
+                                        info("\t\t$it")
+                                    }
+                                }
                                 val originalLocationList = hookParam.args[0] as? List<*>
-                                logcatInfo { "onLocationChanged(List<Location>): ${originalLocationList?.size}" }
                                 if (originalLocationList != null && originalLocationList.isNotEmpty()) {
                                     hookParam.args[0] = originalLocationList.map {
                                         if (it is Location) {
@@ -302,6 +319,67 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                         }
                     }
                 }
+            }
+        }
+    }
+
+    private fun hookILocationListenerOfSystemService() {
+        val onLocationChanged = "onLocationChanged"
+        XposedHelpers.findClassIfExists("android.location.ILocationListener", LocationListener::class.java.classLoader)?.run {
+            for (method in declaredMethods) {
+                if (method.name == onLocationChanged) {
+                    val target = method.name
+                    val paramsTypes = method.parameterTypes
+                    if (paramsTypes.isNotEmpty()) {
+                        if (paramsTypes.first() == Location::class.java) {
+                            // Hook and modify LocationListener#onLocationChanged(Location)
+                            beforeHookedMethod(target, *paramsTypes) { hookParam ->
+                                toast {
+                                    "invoked: ${hookParam.method}"
+                                }
+                                logcat {
+                                    info("onMethodInvoke ${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                    info("\tfrom:")
+                                    Throwable().stackTrace.forEach {
+                                        info("\t\t$it")
+                                    }
+                                }
+                                val originalLocation = hookParam.args[0] as? Location
+                                if (originalLocation != null) {
+                                    hookParam.args[0] = modifyLocationToGcj02(originalLocation, true)
+                                }
+                            }
+                        } else if (List::class.java.isAssignableFrom(paramsTypes.first())) {
+                            // Hook and modify LocationListener#onLocationChanged(List<Location>)
+                            beforeHookedMethod(target, *paramsTypes) { hookParam ->
+                                toast {
+                                    "invoked: ${hookParam.method}"
+                                }
+                                logcat {
+                                    info("onMethodInvoke ${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                    info("\tfrom:")
+                                    Throwable().stackTrace.forEach {
+                                        info("\t\t$it")
+                                    }
+                                }
+                                val originalLocationList = hookParam.args[0] as? List<*>
+                                if (originalLocationList != null && originalLocationList.isNotEmpty()) {
+                                    hookParam.args[0] = originalLocationList.map {
+                                        if (it is Location) {
+                                            modifyLocationToGcj02(it, true)
+                                        } else {
+                                            it
+                                        }
+                                    }.toMutableList()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } ?: run {
+            toast {
+                "NotFound: ILocationListener"
             }
         }
     }
