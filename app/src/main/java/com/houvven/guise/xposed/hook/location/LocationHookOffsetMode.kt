@@ -1,21 +1,20 @@
 package com.houvven.guise.xposed.hook.location
 
-import android.location.Criteria
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
-import android.os.UserHandle
 import com.houvven.guise.xposed.config.ModuleConfig
 import com.houvven.ktx_xposed.hook.*
 import com.houvven.ktx_xposed.logger.*
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
-import java.util.Arrays
+import java.util.*
 
 class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBase(config) {
     private val initMs = System.currentTimeMillis()
+    private val locker = this
 
     private var lastGcj02LatLng: CoordTransform.LatLng? = null
         set(value) {
@@ -59,76 +58,78 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                 if ((method.name == "getLatitude" || method.name == "getLongitude") && method.returnType == Double::class.java) {
                     hasHook = true
                     afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
-                        (hookParam.thisObject as? Location)?.let { location ->
-                            logcat {
-                                info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${method.name}@${location.myHashcode()}")
-                                info("\tfrom:")
-                                Throwable().stackTrace.forEach {
-                                    info("\t\t$it")
+                        synchronized(locker) {
+                            (hookParam.thisObject as? Location)?.let { location ->
+                                logcat {
+                                    info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${method.name}@${location.myHashcode()}")
+                                    info("\tfrom:")
+                                    Throwable().stackTrace.forEach {
+                                        info("\t\t$it")
+                                    }
+                                    info("\t$location")
+                                    info("\tprovider: ${location.safeGetProvider()}")
                                 }
-                                info("\t$location")
-                                info("\tprovider: ${location.safeGetProvider()}")
-                            }
-                            synchronized(location) {
-                                val mode: String
-                                val lastLatLng = lastGcj02LatLng
-                                val old = hookParam.result
-                                if (!location.isGcj02Location()) {
-                                    if (location.isTransformable()) {
-                                        if (location.shouldTransform()) {
-                                            mode = "transform"
-                                            location.wgs84ToGcj02()?.let {
-                                                location.safeSetLatLng(it)
-                                                updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
-                                                when (method.name) {
-                                                    "getLatitude" -> hookParam.result = it.latitude
-                                                    "getLongitude" -> hookParam.result = it.longitude
+                                synchronized(location) {
+                                    val mode: String
+                                    val lastLatLng = lastGcj02LatLng
+                                    val old = hookParam.result
+                                    if (!location.isGcj02Location()) {
+                                        if (location.isTransformable()) {
+                                            if (location.shouldTransform()) {
+                                                mode = "transform"
+                                                location.wgs84ToGcj02()?.let {
+                                                    location.safeSetLatLng(it)
+                                                    updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
+                                                    when (method.name) {
+                                                        "getLatitude" -> hookParam.result = it.latitude
+                                                        "getLongitude" -> hookParam.result = it.longitude
+                                                    }
                                                 }
+                                            } else {
+                                                mode = "out-of-bounds"
                                             }
                                         } else {
-                                            mode = "out-of-bounds"
+                                            if (location.isReliableFused(lastGcj02LatLng)) {
+                                                mode = "fused"
+                                                location.safeGetLatLng()?.let {
+                                                    updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
+                                                }
+                                            } else {
+                                                var refineLatLng = location.tryReverseTransform(lastGcj02LatLng)
+                                                if (refineLatLng != null) {
+                                                    mode = "reverse"
+                                                } else {
+                                                    // Try pass by the last gcj-02 location
+                                                    if (lastGcj02LatLng != null &&
+                                                        Math.abs(location.elapsedRealtimeNanos - lastGcj02LatLng!!.elapsedRealtimeNanos) in 0..10 * 1000000L) { // 10s
+                                                        mode = "cache"
+                                                        refineLatLng = lastGcj02LatLng
+                                                    } else {
+                                                        logcatInfo {
+                                                            "\ttime ago: ${location.elapsedRealtimeNanos} - ${lastGcj02LatLng?.elapsedRealtimeNanos} = " +
+                                                                    "${(location.elapsedRealtimeNanos - (lastGcj02LatLng?.elapsedRealtimeNanos ?: 0)) / (10 * 1000000L)} s"
+                                                        }
+                                                        mode = "unknown"
+                                                    }
+                                                }
+                                                refineLatLng?.let {
+                                                    location.safeSetLatLng(it)
+                                                    updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
+                                                    when (method.name) {
+                                                        "getLatitude" -> hookParam.result = it.latitude
+                                                        "getLongitude" -> hookParam.result = it.longitude
+                                                    }
+                                                }
+                                            }
                                         }
                                     } else {
-                                        if (location.isReliableFused(lastGcj02LatLng)) {
-                                            mode = "fused"
-                                            location.safeGetLatLng()?.let {
-                                                updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
-                                            }
-                                        } else {
-                                            var refineLatLng = location.tryReverseTransform(lastGcj02LatLng)
-                                            if (refineLatLng != null) {
-                                                mode = "reverse"
-                                            } else {
-                                                // Try pass by the last gcj-02 location
-                                                if (lastGcj02LatLng != null &&
-                                                    Math.abs(location.elapsedRealtimeNanos - lastGcj02LatLng!!.elapsedRealtimeNanos) in 0..10 * 1000000L) { // 10s
-                                                    mode = "cache"
-                                                    refineLatLng = lastGcj02LatLng
-                                                } else {
-                                                    logcatInfo {
-                                                        "\ttime ago: ${location.elapsedRealtimeNanos} - ${lastGcj02LatLng?.elapsedRealtimeNanos} = " +
-                                                                "${(location.elapsedRealtimeNanos - (lastGcj02LatLng?.elapsedRealtimeNanos ?: 0)) / (10 * 1000000L)} s"
-                                                    }
-                                                    mode = "unknown"
-                                                }
-                                            }
-                                            refineLatLng?.let {
-                                                location.safeSetLatLng(it)
-                                                updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
-                                                when (method.name) {
-                                                    "getLatitude" -> hookParam.result = it.latitude
-                                                    "getLongitude" -> hookParam.result = it.longitude
-                                                }
-                                            }
-                                        }
+                                        mode = "gcj-02"
                                     }
-                                } else {
-                                    mode = "gcj-02"
-                                }
-                                logcat {
-                                    info("\tmode: $mode")
-                                    info("\tlast: [${lastLatLng?.latitude}, ${lastLatLng?.longitude}]")
-                                    info("\t${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
+                                    logcat {
+                                        info("\tmode: $mode")
+                                        info("\tlast: [${lastLatLng?.latitude}, ${lastLatLng?.longitude}]")
+                                        info("\t${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
+                                    }
                                 }
                             }
                         }
@@ -140,13 +141,15 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                     val target = method.name
                     val paramsTypes = method.parameterTypes
                     afterHookedMethod(target, *paramsTypes) { hookParam ->
-                        logcat {
-                            val hashcode = (hookParam.thisObject as? Location)?.myHashcode() ?: "null"
-                            info("onMethodInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}@${hashcode}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
-                            // info("\tfrom:")
-                            // Throwable().stackTrace.forEach {
-                            //     info("\t\t$it")
-                            // }
+                        synchronized(locker) {
+                            logcat {
+                                val hashcode = (hookParam.thisObject as? Location)?.myHashcode() ?: "null"
+                                info("onMethodInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}@${hashcode}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                // info("\tfrom:")
+                                // Throwable().stackTrace.forEach {
+                                //     info("\t\t$it")
+                                // }
+                            }
                         }
                     }
                 }
@@ -160,9 +163,11 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                 (it.name == "getLastLocation" || it.name == "getLastKnownLocation") && it.returnType == Location::class.java
             }.forEach { method ->
                 afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
-                    (hookParam.result as? Location)?.let {
-                        logcatInfo { "onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${method.name}" }
-                        hookParam.result = modifyLocationToGcj02(it, true)
+                    synchronized(locker) {
+                        (hookParam.result as? Location)?.let {
+                            logcatInfo { "onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${method.name}" }
+                            hookParam.result = modifyLocationToGcj02(it, true)
+                        }
                     }
                 }
             }
@@ -194,82 +199,96 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                         // Hook and modify location
                         hasHook = true
                         afterHookedMethod(target, *paramsTypes) { hookParam ->
-                            val listener = hookParam.args[indexOf] as LocationListener
-                            logcat {
-                                info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#$target, idx=$indexOf, listener=${listener.hashCode()}")
-                                info("\tfrom:")
-                                Throwable().stackTrace.forEach {
-                                    info("\t\t$it")
+                            synchronized(locker) {
+                                val listener = hookParam.args[indexOf] as LocationListener
+                                logcat {
+                                    info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#$target, idx=$indexOf, listener=${listener.hashCode()}")
+                                    info("\tfrom:")
+                                    Throwable().stackTrace.forEach {
+                                        info("\t\t$it")
+                                    }
                                 }
-                            }
-                            when(method.name) {
-                                requestLocationUpdates, requestSingleUpdate -> {
-                                    val wrapper = listenerHolder.getOrElse(listener.hashCode()) {
-                                        return@getOrElse object : LocationListener {
-                                            override fun onLocationChanged(location: Location) {
-                                                logcatInfo { "onLocationChanged" }
-                                                listener.onLocationChanged(modifyLocationToGcj02(location, true))
-                                            }
-                                            override fun onLocationChanged(locations: List<Location>) {
-                                                logcatInfo { "onLocationChanged list: ${locations.size}" }
-                                                val fakeLocations = arrayListOf<Location>()
-                                                for (location in locations) {
-                                                    fakeLocations.add(modifyLocationToGcj02(location, true))
+                                when(method.name) {
+                                    requestLocationUpdates, requestSingleUpdate -> {
+                                        val wrapper = listenerHolder.getOrElse(listener.hashCode()) {
+                                            return@getOrElse object : LocationListener {
+                                                override fun onLocationChanged(location: Location) {
+                                                    synchronized(locker) {
+                                                        logcatInfo { "onLocationChanged" }
+                                                        listener.onLocationChanged(modifyLocationToGcj02(location, true))
+                                                    }
                                                 }
-                                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                                    listener.onLocationChanged(fakeLocations)
+                                                override fun onLocationChanged(locations: List<Location>) {
+                                                    synchronized(locker) {
+                                                        logcatInfo { "onLocationChanged list: ${locations.size}" }
+                                                        val fakeLocations = arrayListOf<Location>()
+                                                        for (location in locations) {
+                                                            fakeLocations.add(modifyLocationToGcj02(location, true))
+                                                        }
+                                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                                            listener.onLocationChanged(fakeLocations)
+                                                        }
+                                                    }
                                                 }
-                                            }
-                                            override fun onFlushComplete(requestCode: Int) {
-                                                logcatInfo { "onFlushComplete" }
-                                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                                    listener.onFlushComplete(requestCode)
+                                                override fun onFlushComplete(requestCode: Int) {
+                                                    synchronized(locker) {
+                                                        logcatInfo { "onFlushComplete" }
+                                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                                            listener.onFlushComplete(requestCode)
+                                                        }
+                                                    }
                                                 }
-                                            }
-                                            override fun onStatusChanged(provider: String, status: Int, extras: Bundle) {
-                                                logcatInfo { "onStatusChanged: provider=$provider, status=$status" }
-                                                listener.onStatusChanged(provider, status, extras)
-                                            }
-                                            override fun onProviderEnabled(provider: String) {
-                                                logcatInfo { "onProviderEnabled" }
-                                                listener.onProviderEnabled(provider)
-                                            }
-                                            override fun onProviderDisabled(provider: String) {
-                                                logcatInfo { "onProviderDisabled" }
-                                                listener.onProviderDisabled(provider)
+                                                override fun onStatusChanged(provider: String, status: Int, extras: Bundle) {
+                                                    synchronized(locker) {
+                                                        logcatInfo { "onStatusChanged: provider=$provider, status=$status" }
+                                                        listener.onStatusChanged(provider, status, extras)
+                                                    }
+                                                }
+                                                override fun onProviderEnabled(provider: String) {
+                                                    synchronized(locker) {
+                                                        logcatInfo { "onProviderEnabled" }
+                                                        listener.onProviderEnabled(provider)
+                                                    }
+                                                }
+                                                override fun onProviderDisabled(provider: String) {
+                                                    synchronized(locker) {
+                                                        logcatInfo { "onProviderDisabled" }
+                                                        listener.onProviderDisabled(provider)
+                                                    }
+                                                }
                                             }
                                         }
-                                    }
-                                    if (method.name != requestSingleUpdate) {
-                                        synchronized(listenerHolder) {
-                                            listenerHolder[listener.hashCode()] = wrapper
+                                        if (method.name != requestSingleUpdate) {
+                                            synchronized(listenerHolder) {
+                                                listenerHolder[listener.hashCode()] = wrapper
+                                            }
                                         }
+                                        logcatInfo { "\tadd origin(${listener.hashCode()})>>wrapper(${wrapper.hashCode()}), size=${listenerHolder.size}" }
+                                        hookParam.args[indexOf] = wrapper
                                     }
-                                    logcatInfo { "\tadd origin(${listener.hashCode()})>>wrapper(${wrapper.hashCode()}), size=${listenerHolder.size}" }
-                                    hookParam.args[indexOf] = wrapper
-                                }
 
-                                removeUpdates -> {
-                                    synchronized(listenerHolder) {
-                                        logcatInfo { "\tlistenerHolder: $listenerHolder" }
-                                        listenerHolder[listener.hashCode()]?.let {
-                                            hookParam.args[indexOf] = it
-                                        }
-                                        val hashcodeToBeRemoved = mutableListOf<Int>()
-                                        var next = listener.hashCode()
-                                        while (listenerHolder.containsKey(next)) {
-                                            hashcodeToBeRemoved.add(next)
-                                            next = listenerHolder[next].hashCode()
-                                        }
-                                        hashcodeToBeRemoved.forEach { hashcode ->
-                                            listenerHolder.remove(hashcode)?.let { wrapper ->
-                                                logcatInfo { "\tremove origin($hashcode)>>wrapper(${wrapper.hashCode()}), size=${listenerHolder.size}" }
-                                                if (hashcode != listener.hashCode()) {
-                                                    XposedBridge.invokeOriginalMethod(
-                                                        hookParam.method,
-                                                        hookParam.thisObject,
-                                                        arrayOf(wrapper)
-                                                    )
+                                    removeUpdates -> {
+                                        synchronized(listenerHolder) {
+                                            logcatInfo { "\tlistenerHolder: $listenerHolder" }
+                                            listenerHolder[listener.hashCode()]?.let {
+                                                hookParam.args[indexOf] = it
+                                            }
+                                            val hashcodeToBeRemoved = mutableListOf<Int>()
+                                            var next = listener.hashCode()
+                                            while (listenerHolder.containsKey(next)) {
+                                                hashcodeToBeRemoved.add(next)
+                                                next = listenerHolder[next].hashCode()
+                                            }
+                                            hashcodeToBeRemoved.forEach { hashcode ->
+                                                listenerHolder.remove(hashcode)?.let { wrapper ->
+                                                    logcatInfo { "\tremove origin($hashcode)>>wrapper(${wrapper.hashCode()}), size=${listenerHolder.size}" }
+                                                    if (hashcode != listener.hashCode()) {
+                                                        XposedBridge.invokeOriginalMethod(
+                                                            hookParam.method,
+                                                            hookParam.thisObject,
+                                                            arrayOf(wrapper)
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -285,12 +304,14 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                     val target = method.name
                     val paramsTypes = method.parameterTypes
                     afterHookedMethod(target, *paramsTypes) { hookParam ->
-                        logcat {
-                            info("onMethodInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
-                            // info("\tfrom:")
-                            // Throwable().stackTrace.forEach {
-                            //     info("\t\t$it")
-                            // }
+                        synchronized(locker) {
+                            logcat {
+                                info("onMethodInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                // info("\tfrom:")
+                                // Throwable().stackTrace.forEach {
+                                //     info("\t\t$it")
+                                // }
+                            }
                         }
                     }
                 }
@@ -312,37 +333,41 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                         if (paramsTypes.first() == Location::class.java) {
                             // Hook and modify LocationListener#onLocationChanged(Location)
                             beforeHookedMethod(target, *paramsTypes) { hookParam ->
-                                logcat {
-                                    info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
-                                    info("\tfrom:")
-                                    Throwable().stackTrace.forEach {
-                                        info("\t\t$it")
+                                synchronized(locker) {
+                                    logcat {
+                                        info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                        info("\tfrom:")
+                                        Throwable().stackTrace.forEach {
+                                            info("\t\t$it")
+                                        }
                                     }
-                                }
-                                val originalLocation = hookParam.args[0] as? Location
-                                if (originalLocation != null) {
-                                    hookParam.args[0] = modifyLocationToGcj02(originalLocation, true)
+                                    val originalLocation = hookParam.args[0] as? Location
+                                    if (originalLocation != null) {
+                                        hookParam.args[0] = modifyLocationToGcj02(originalLocation, true)
+                                    }
                                 }
                             }
                         } else if (List::class.java.isAssignableFrom(paramsTypes.first())) {
                             // Hook and modify LocationListener#onLocationChanged(List<Location>)
                             beforeHookedMethod(target, *paramsTypes) { hookParam ->
-                                logcat {
-                                    info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
-                                    info("\tfrom:")
-                                    Throwable().stackTrace.forEach {
-                                        info("\t\t$it")
-                                    }
-                                }
-                                val originalLocationList = hookParam.args[0] as? List<*>
-                                if (originalLocationList != null && originalLocationList.isNotEmpty()) {
-                                    hookParam.args[0] = originalLocationList.map {
-                                        if (it is Location) {
-                                            modifyLocationToGcj02(it, true)
-                                        } else {
-                                            it
+                                synchronized(locker) {
+                                    logcat {
+                                        info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                        info("\tfrom:")
+                                        Throwable().stackTrace.forEach {
+                                            info("\t\t$it")
                                         }
-                                    }.toMutableList()
+                                    }
+                                    val originalLocationList = hookParam.args[0] as? List<*>
+                                    if (originalLocationList != null && originalLocationList.isNotEmpty()) {
+                                        hookParam.args[0] = originalLocationList.map {
+                                            if (it is Location) {
+                                                modifyLocationToGcj02(it, true)
+                                            } else {
+                                                it
+                                            }
+                                        }.toMutableList()
+                                    }
                                 }
                             }
                         }
@@ -366,43 +391,47 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                         if (paramsTypes.first() == Location::class.java) {
                             // Hook and modify LocationListener#onLocationChanged(Location)
                             beforeHookedMethod(target, *paramsTypes) { hookParam ->
-                                toast {
-                                    "invoked: ${hookParam.method}"
-                                }
-                                logcat {
-                                    info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
-                                    info("\tfrom:")
-                                    Throwable().stackTrace.forEach {
-                                        info("\t\t$it")
+                                synchronized(locker) {
+                                    toast {
+                                        "invoked: ${hookParam.method}"
                                     }
-                                }
-                                val originalLocation = hookParam.args[0] as? Location
-                                if (originalLocation != null) {
-                                    hookParam.args[0] = modifyLocationToGcj02(originalLocation, true)
+                                    logcat {
+                                        info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                        info("\tfrom:")
+                                        Throwable().stackTrace.forEach {
+                                            info("\t\t$it")
+                                        }
+                                    }
+                                    val originalLocation = hookParam.args[0] as? Location
+                                    if (originalLocation != null) {
+                                        hookParam.args[0] = modifyLocationToGcj02(originalLocation, true)
+                                    }
                                 }
                             }
                         } else if (List::class.java.isAssignableFrom(paramsTypes.first())) {
                             // Hook and modify LocationListener#onLocationChanged(List<Location>)
                             beforeHookedMethod(target, *paramsTypes) { hookParam ->
-                                toast {
-                                    "invoked: ${hookParam.method}"
-                                }
-                                logcat {
-                                    info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
-                                    info("\tfrom:")
-                                    Throwable().stackTrace.forEach {
-                                        info("\t\t$it")
+                                synchronized(locker) {
+                                    toast {
+                                        "invoked: ${hookParam.method}"
                                     }
-                                }
-                                val originalLocationList = hookParam.args[0] as? List<*>
-                                if (originalLocationList != null && originalLocationList.isNotEmpty()) {
-                                    hookParam.args[0] = originalLocationList.map {
-                                        if (it is Location) {
-                                            modifyLocationToGcj02(it, true)
-                                        } else {
-                                            it
+                                    logcat {
+                                        info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                        info("\tfrom:")
+                                        Throwable().stackTrace.forEach {
+                                            info("\t\t$it")
                                         }
-                                    }.toMutableList()
+                                    }
+                                    val originalLocationList = hookParam.args[0] as? List<*>
+                                    if (originalLocationList != null && originalLocationList.isNotEmpty()) {
+                                        hookParam.args[0] = originalLocationList.map {
+                                            if (it is Location) {
+                                                modifyLocationToGcj02(it, true)
+                                            } else {
+                                                it
+                                            }
+                                        }.toMutableList()
+                                    }
                                 }
                             }
                         }
@@ -478,17 +507,19 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                     val target = method.name
                     val paramsTypes = method.parameterTypes
                     afterHookedMethod(target, *paramsTypes) { hookParam ->
-                        logcat {
-                            info("onMethodInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
-                            // info("\tfrom:")
-                            // Throwable().stackTrace.forEach {
-                            //     info("\t\t$it")
+                        synchronized(locker) {
+                            logcat {
+                                info("onMethodInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                // info("\tfrom:")
+                                // Throwable().stackTrace.forEach {
+                                //     info("\t\t$it")
+                                // }
+                            }
+                            // when (hookParam.method.name) {
+                            //     isLocationEnabledForUser -> {}
+                            //     else -> logcatWarn { "Unknown method: ${hookParam.method}" }
                             // }
                         }
-                        // when (hookParam.method.name) {
-                        //     isLocationEnabledForUser -> {}
-                        //     else -> logcatWarn { "Unknown method: ${hookParam.method}" }
-                        // }
                     }
                 }
             }
