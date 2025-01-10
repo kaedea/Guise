@@ -96,6 +96,8 @@ object XposedLogger {
     }
 }
 
+fun debuggable() = BuildConfig.DEBUG
+
 inline fun logcat(logToXposed: Boolean = false, block: XposedLogger.Wrapper.() -> Unit) {
     if (!BuildConfig.DEBUG && !logToXposed) {
         return

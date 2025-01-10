@@ -45,7 +45,7 @@ private val mGcj02Holder by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
 }
 internal fun Location.myHashcode(): Int {
     safeGetLatLng()?.let {
-        return Objects.hash(provider, it.longitude, it.latitude)
+        return Objects.hash(safeGetProvider(), it.longitude, it.latitude)
     }
     return hashCode()
 }
@@ -56,7 +56,7 @@ internal fun Location.isGcj02Location(): Boolean {
             return true
         }
     }
-    if (provider?.endsWith("@gcj02") == true) {
+    if (safeGetProvider()?.endsWith("@gcj02") == true) {
         return true
     }
     return extras != null && extras!!.getBoolean("wgs2gcj", false)
@@ -75,7 +75,7 @@ internal fun Location.shouldTransform(): Boolean {
 }
 
 internal fun Location.isTransformable(): Boolean {
-    if (provider == LocationManager.GPS_PROVIDER || provider == LocationManager.NETWORK_PROVIDER) {
+    if (safeGetProvider() == LocationManager.GPS_PROVIDER || safeGetProvider() == LocationManager.NETWORK_PROVIDER) {
         return true
     }
     // if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && provider == LocationManager.FUSED_PROVIDER) {
@@ -92,7 +92,7 @@ internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null)
         return true
     }
     var reliable = false
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && provider == LocationManager.FUSED_PROVIDER) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && safeGetProvider() == LocationManager.FUSED_PROVIDER) {
         // Fused Location might has been transformed twice: We transformed it and then GMS did it again
         // In this case, we give up this location, or reverse it backward.
         // Likely twice-transformed:
@@ -133,7 +133,7 @@ internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null)
             }
         }
     } else {
-        logcatInfo { "\tno: provider=${provider}" }
+        logcatInfo { "\tno: provider=${safeGetProvider()}" }
     }
     return reliable
 }
@@ -227,7 +227,7 @@ internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
     return newLatLng
 }
 
-private val latitudeMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+private val getLatitudeMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     try {
         return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "getLatitude").also {
             it.isAccessible = true
@@ -237,9 +237,19 @@ private val latitudeMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     }
 }
 
-private val longitudeMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+private val getLongitudeMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     try {
         return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "getLongitude").also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
+private val getProviderMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "getProvider").also {
             it.isAccessible = true
         }
     } catch (e: Exception) {
@@ -278,18 +288,18 @@ private val extrasField by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
 }
 
 /**
- * Avoid recursive hooking
+ * Avoid recursive hooking, because we might has hooked every apis of Location
  */
 internal fun Location.safeGetLatLng(): CoordTransform.LatLng? {
     run {
-        if (latitudeMethod != null && longitudeMethod != null) {
+        if (getLatitudeMethod != null && getLongitudeMethod != null) {
             val lat = XposedBridge.invokeOriginalMethod(
-                latitudeMethod,
+                getLatitudeMethod,
                 this,
                 arrayOf()
             ) as? Double
             val lng = XposedBridge.invokeOriginalMethod(
-                longitudeMethod,
+                getLongitudeMethod,
                 this,
                 arrayOf()
             ) as? Double
@@ -306,7 +316,7 @@ internal fun Location.safeGetLatLng(): CoordTransform.LatLng? {
         }
     }
     val raw = toString()
-    val symBgn = "Location[${provider} "
+    val symBgn = "Location[${safeGetProvider()} "
     val symEnd = " "
     if (raw.startsWith(symBgn)) {
         val prefix = raw.substring(raw.indexOf(symBgn) + symBgn.length)
@@ -319,6 +329,14 @@ internal fun Location.safeGetLatLng(): CoordTransform.LatLng? {
         }
     }
     return null
+}
+
+internal fun Location.safeGetProvider(): String? {
+    return XposedBridge.invokeOriginalMethod(
+        getProviderMethod,
+        this,
+        null
+    ) as? String
 }
 
 internal fun Location.safeSetLatLng(latLng: CoordTransform.LatLng) {

@@ -9,15 +9,13 @@ import android.os.Bundle
 import android.os.UserHandle
 import com.houvven.guise.xposed.config.ModuleConfig
 import com.houvven.ktx_xposed.hook.*
-import com.houvven.ktx_xposed.logger.logcat
-import com.houvven.ktx_xposed.logger.logcatInfo
-import com.houvven.ktx_xposed.logger.logcatWarn
-import com.houvven.ktx_xposed.logger.toast
+import com.houvven.ktx_xposed.logger.*
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import java.util.Arrays
 
 class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBase(config) {
+    private val initMs = System.currentTimeMillis()
 
     private var lastGcj02LatLng: CoordTransform.LatLng? = null
         set(value) {
@@ -32,12 +30,9 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         // Location APIs
         hookLocation()
         hookGetLastLocation()
-        if (HOOK_LOCATION_LISTENER) {
-            hookLocationListener()
-            // hookILocationListenerOfSystemService()
-        } else {
-            hookLocationUpdateRequest()
-        }
+        hookLocationUpdateRequest()
+        hookLocationListener()
+        // hookILocationListenerOfSystemService()
 
         // Others
         if (config.makeWifiLocationFail) {
@@ -48,7 +43,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
             makeTelLocationFail()
         }
 
-        // hookProviderState()
+        hookProviderState()
 
         // GPS
         removeNmeaListener()
@@ -59,80 +54,98 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
 
     private fun hookLocation() {
         Location::class.java.run {
-            declaredMethods.filter {
-                (it.name == "getLatitude" || it.name == "getLongitude") && it.returnType == Double::class.java
-            }.forEach { method ->
-                afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
-                    (hookParam.thisObject as? Location)?.let { location ->
+            for (method in declaredMethods) {
+                var hasHook = false
+                if ((method.name == "getLatitude" || method.name == "getLongitude") && method.returnType == Double::class.java) {
+                    hasHook = true
+                    afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
+                        (hookParam.thisObject as? Location)?.let { location ->
+                            logcat {
+                                info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${method.name}@${location.myHashcode()}")
+                                info("\tfrom:")
+                                Throwable().stackTrace.forEach {
+                                    info("\t\t$it")
+                                }
+                                info("\t$location")
+                                info("\tprovider: ${location.safeGetProvider()}")
+                            }
+                            synchronized(location) {
+                                val mode: String
+                                val lastLatLng = lastGcj02LatLng
+                                val old = hookParam.result
+                                if (!location.isGcj02Location()) {
+                                    if (location.isTransformable()) {
+                                        if (location.shouldTransform()) {
+                                            mode = "transform"
+                                            location.wgs84ToGcj02()?.let {
+                                                location.safeSetLatLng(it)
+                                                updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
+                                                when (method.name) {
+                                                    "getLatitude" -> hookParam.result = it.latitude
+                                                    "getLongitude" -> hookParam.result = it.longitude
+                                                }
+                                            }
+                                        } else {
+                                            mode = "out-of-bounds"
+                                        }
+                                    } else {
+                                        if (location.isReliableFused(lastGcj02LatLng)) {
+                                            mode = "fused"
+                                            location.safeGetLatLng()?.let {
+                                                updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
+                                            }
+                                        } else {
+                                            var refineLatLng = location.tryReverseTransform(lastGcj02LatLng)
+                                            if (refineLatLng != null) {
+                                                mode = "reverse"
+                                            } else {
+                                                // Try pass by the last gcj-02 location
+                                                if (lastGcj02LatLng != null &&
+                                                    Math.abs(location.elapsedRealtimeNanos - lastGcj02LatLng!!.elapsedRealtimeNanos) in 0..10 * 1000000L) { // 10s
+                                                    mode = "cache"
+                                                    refineLatLng = lastGcj02LatLng
+                                                } else {
+                                                    logcatInfo {
+                                                        "\ttime ago: ${location.elapsedRealtimeNanos} - ${lastGcj02LatLng?.elapsedRealtimeNanos} = " +
+                                                                "${(location.elapsedRealtimeNanos - (lastGcj02LatLng?.elapsedRealtimeNanos ?: 0)) / (10 * 1000000L)} s"
+                                                    }
+                                                    mode = "unknown"
+                                                }
+                                            }
+                                            refineLatLng?.let {
+                                                location.safeSetLatLng(it)
+                                                updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
+                                                when (method.name) {
+                                                    "getLatitude" -> hookParam.result = it.latitude
+                                                    "getLongitude" -> hookParam.result = it.longitude
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    mode = "gcj-02"
+                                }
+                                logcat {
+                                    info("\tmode: $mode")
+                                    info("\tlast: [${lastLatLng?.latitude}, ${lastLatLng?.longitude}]")
+                                    info("\t${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Hook the remaining apis for debug
+                if (debuggable() && !hasHook) {
+                    val target = method.name
+                    val paramsTypes = method.parameterTypes
+                    afterHookedMethod(target, *paramsTypes) { hookParam ->
                         logcat {
-                            info("onMethodInvoke ${method.name}@${location.myHashcode()}")
+                            val hashcode = (hookParam.thisObject as? Location)?.myHashcode() ?: "null"
+                            info("onMethodInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}@${hashcode}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
                             info("\tfrom:")
                             Throwable().stackTrace.forEach {
                                 info("\t\t$it")
-                            }
-                            info("\t$location")
-                            info("\tprovider: ${location.provider}")
-                        }
-                        synchronized(location) {
-                            val mode: String
-                            val lastLatLng = lastGcj02LatLng
-                            val old = hookParam.result
-                            if (!location.isGcj02Location()) {
-                                if (location.isTransformable()) {
-                                    if (location.shouldTransform()) {
-                                        mode = "transform"
-                                        location.wgs84ToGcj02()?.let {
-                                            location.safeSetLatLng(it)
-                                            updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
-                                            when (method.name) {
-                                                "getLatitude" -> hookParam.result = it.latitude
-                                                "getLongitude" -> hookParam.result = it.longitude
-                                            }
-                                        }
-                                    } else {
-                                        mode = "out-of-bounds"
-                                    }
-                                } else {
-                                    if (location.isReliableFused(lastGcj02LatLng)) {
-                                        mode = "fused"
-                                        location.safeGetLatLng()?.let {
-                                            updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
-                                        }
-                                    } else {
-                                        var refineLatLng = location.tryReverseTransform(lastGcj02LatLng)
-                                        if (refineLatLng != null) {
-                                            mode = "reverse"
-                                        } else {
-                                            // Try pass by the last gcj-02 location
-                                            if (lastGcj02LatLng != null &&
-                                                Math.abs(location.elapsedRealtimeNanos - lastGcj02LatLng!!.elapsedRealtimeNanos) in 0..10 * 1000000L) { // 10s
-                                                mode = "cache"
-                                                refineLatLng = lastGcj02LatLng
-                                            } else {
-                                                logcatInfo {
-                                                    "\ttime ago: ${location.elapsedRealtimeNanos} - ${lastGcj02LatLng?.elapsedRealtimeNanos} = " +
-                                                            "${(location.elapsedRealtimeNanos - (lastGcj02LatLng?.elapsedRealtimeNanos ?: 0)) / (10 * 1000000L)} s"
-                                                }
-                                                mode = "unknown"
-                                            }
-                                        }
-                                        refineLatLng?.let {
-                                            location.safeSetLatLng(it)
-                                            updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
-                                            when (method.name) {
-                                                "getLatitude" -> hookParam.result = it.latitude
-                                                "getLongitude" -> hookParam.result = it.longitude
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                mode = "gcj-02"
-                            }
-                            logcat {
-                                info("\tmode: $mode")
-                                info("\tlast: [${lastLatLng?.latitude}, ${lastLatLng?.longitude}]")
-                                info("\t${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
                             }
                         }
                     }
@@ -148,7 +161,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
             }.forEach { method ->
                 afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
                     (hookParam.result as? Location)?.let {
-                        logcatInfo { "onMethodInvoke ${method.name}" }
+                        logcatInfo { "onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${method.name}" }
                         hookParam.result = modifyLocationToGcj02(it, true)
                     }
                 }
@@ -163,7 +176,10 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
 
         LocationManager::class.java.run {
             for (method in declaredMethods) {
-                if (method.name == requestLocationUpdates || method.name == requestSingleUpdate || method.name == removeUpdates) {
+                var hasHook = false
+                if (!HOOK_LOCATION_LISTENER &&
+                    (method.name == requestLocationUpdates || method.name == requestSingleUpdate || method.name == removeUpdates)
+                ) {
                     val target = method.name
                     val paramsTypes = method.parameterTypes
                     val indexOf = method.parameterTypes.indexOf(LocationListener::class.java)
@@ -176,10 +192,11 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                         continue
                     } else {
                         // Hook and modify location
+                        hasHook = true
                         afterHookedMethod(target, *paramsTypes) { hookParam ->
                             val listener = hookParam.args[indexOf] as LocationListener
                             logcat {
-                                info("onMethodInvoke $target, idx=$indexOf, listener=${listener.hashCode()}")
+                                info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#$target, idx=$indexOf, listener=${listener.hashCode()}")
                                 info("\tfrom:")
                                 Throwable().stackTrace.forEach {
                                     info("\t\t$it")
@@ -261,18 +278,30 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                             }
                         }
                     }
-                } else {
-                    // val target = method.name
-                    // val paramsTypes = method.parameterTypes
-                    // afterHookedMethod(target, *paramsTypes) { hookParam ->
-                    //     logcatInfo { "onMethodInvoke LocationManager#$target" }
-                    // }
+                }
+
+                // Hook the remaining apis for debug
+                if (debuggable() && !hasHook) {
+                    val target = method.name
+                    val paramsTypes = method.parameterTypes
+                    afterHookedMethod(target, *paramsTypes) { hookParam ->
+                        logcat {
+                            info("onMethodInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                            info("\tfrom:")
+                            Throwable().stackTrace.forEach {
+                                info("\t\t$it")
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
     private fun hookLocationListener() {
+        if (!HOOK_LOCATION_LISTENER) {
+            return
+        }
         val onLocationChanged = "onLocationChanged"
         LocationListener::class.java.run {
             for (method in declaredMethods) {
@@ -284,7 +313,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                             // Hook and modify LocationListener#onLocationChanged(Location)
                             beforeHookedMethod(target, *paramsTypes) { hookParam ->
                                 logcat {
-                                    info("onMethodInvoke ${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                    info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
                                     info("\tfrom:")
                                     Throwable().stackTrace.forEach {
                                         info("\t\t$it")
@@ -299,7 +328,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                             // Hook and modify LocationListener#onLocationChanged(List<Location>)
                             beforeHookedMethod(target, *paramsTypes) { hookParam ->
                                 logcat {
-                                    info("onMethodInvoke ${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                    info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
                                     info("\tfrom:")
                                     Throwable().stackTrace.forEach {
                                         info("\t\t$it")
@@ -324,6 +353,9 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
     }
 
     private fun hookILocationListenerOfSystemService() {
+        if (!HOOK_LOCATION_LISTENER) {
+            return
+        }
         val onLocationChanged = "onLocationChanged"
         XposedHelpers.findClassIfExists("android.location.ILocationListener", LocationListener::class.java.classLoader)?.run {
             for (method in declaredMethods) {
@@ -338,7 +370,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                     "invoked: ${hookParam.method}"
                                 }
                                 logcat {
-                                    info("onMethodInvoke ${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                    info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
                                     info("\tfrom:")
                                     Throwable().stackTrace.forEach {
                                         info("\t\t$it")
@@ -356,7 +388,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                     "invoked: ${hookParam.method}"
                                 }
                                 logcat {
-                                    info("onMethodInvoke ${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                    info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
                                     info("\tfrom:")
                                     Throwable().stackTrace.forEach {
                                         info("\t\t$it")
@@ -418,10 +450,75 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                 val distance = start.toDistance(latLng)
                 if (distance > 100.0f) {
                     error("\tDRIFTING!! $distance")
+                    if (System.currentTimeMillis() - initMs >= if (debuggable()) 30 * 1000L else 600 * 1000L) {
+                        toast { "DRIFTING!! $distance" }
+                    }
                 }
                 error("\tmoving: $distance")
             }
         }
         return lastGcj02LatLng!!
+    }
+
+    private fun hookProviderState() {
+        val methodList = mutableListOf<String>()
+        val isLocationEnabledForUser = "isLocationEnabledForUser".also { methodList.add(it) }
+
+        val isProviderEnabledForUser = "isProviderEnabledForUser".also { methodList.add(it) }
+        val hasProvider = "hasProvider".also { methodList.add(it) }
+
+        val getProviders = "getProviders".also { methodList.add(it) }
+        val getAllProviders = "getAllProviders".also { methodList.add(it) }
+
+        val getBestProvider = "getBestProvider".also { methodList.add(it) }
+
+        LocationManager::class.java.apply {
+            for (method in declaredMethods) {
+                if (method.name in methodList) {
+                    val target = method.name
+                    val paramsTypes = method.parameterTypes
+                    afterHookedMethod(target, *paramsTypes) { hookParam ->
+                        logcat {
+                            info("onMethodInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                            info("\tfrom:")
+                            Throwable().stackTrace.forEach {
+                                info("\t\t$it")
+                            }
+                        }
+
+                        when (hookParam.method.name) {
+                            isLocationEnabledForUser -> {}
+                            else -> logcatWarn { "Unknown method: ${hookParam.method}" }
+                        }
+                    }
+                }
+            }
+
+            // setMethodResult(
+            //     methodName = "isLocationEnabledForUser",
+            //     value = true,
+            //     parameterTypes = arrayOf(UserHandle::class.java)
+            // )
+            // beforeHookSomeSameNameMethod(
+            //     "isProviderEnabledForUser", "hasProvider"
+            // ) {
+            //     when (it.args[0] as String) {
+            //         LocationManager.GPS_PROVIDER -> it.result = true
+            //         LocationManager.FUSED_PROVIDER,
+            //         LocationManager.NETWORK_PROVIDER,
+            //         LocationManager.PASSIVE_PROVIDER,
+            //         -> it.result = false
+            //     }
+            // }
+            // setSomeSameNameMethodResult(
+            //     "getProviders", "getAllProviders",
+            //     value = listOf(LocationManager.GPS_PROVIDER)
+            // )
+            // setMethodResult(
+            //     methodName = "getBestProvider",
+            //     value = LocationManager.GPS_PROVIDER,
+            //     parameterTypes = arrayOf(Criteria::class.java, Boolean::class.java)
+            // )
+        }
     }
 }
