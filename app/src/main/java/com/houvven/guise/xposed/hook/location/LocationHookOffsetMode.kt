@@ -143,10 +143,10 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                         logcat {
                             val hashcode = (hookParam.thisObject as? Location)?.myHashcode() ?: "null"
                             info("onMethodInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}@${hashcode}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
-                            info("\tfrom:")
-                            Throwable().stackTrace.forEach {
-                                info("\t\t$it")
-                            }
+                            // info("\tfrom:")
+                            // Throwable().stackTrace.forEach {
+                            //     info("\t\t$it")
+                            // }
                         }
                     }
                 }
@@ -287,10 +287,10 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                     afterHookedMethod(target, *paramsTypes) { hookParam ->
                         logcat {
                             info("onMethodInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
-                            info("\tfrom:")
-                            Throwable().stackTrace.forEach {
-                                info("\t\t$it")
-                            }
+                            // info("\tfrom:")
+                            // Throwable().stackTrace.forEach {
+                            //     info("\t\t$it")
+                            // }
                         }
                     }
                 }
@@ -480,16 +480,15 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                     afterHookedMethod(target, *paramsTypes) { hookParam ->
                         logcat {
                             info("onMethodInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
-                            info("\tfrom:")
-                            Throwable().stackTrace.forEach {
-                                info("\t\t$it")
-                            }
+                            // info("\tfrom:")
+                            // Throwable().stackTrace.forEach {
+                            //     info("\t\t$it")
+                            // }
                         }
-
-                        when (hookParam.method.name) {
-                            isLocationEnabledForUser -> {}
-                            else -> logcatWarn { "Unknown method: ${hookParam.method}" }
-                        }
+                        // when (hookParam.method.name) {
+                        //     isLocationEnabledForUser -> {}
+                        //     else -> logcatWarn { "Unknown method: ${hookParam.method}" }
+                        // }
                     }
                 }
             }

@@ -3,8 +3,8 @@ package com.houvven.ktx_xposed.logger
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AndroidAppHelper
+import android.content.Context
 import android.net.Uri
-import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -14,7 +14,6 @@ import com.houvven.ktx_xposed.BuildConfig
 import com.houvven.ktx_xposed.hook.afterHookedMethod
 import com.houvven.ktx_xposed.hook.lppram
 import com.houvven.ktx_xposed.logger.XposedLogger.TAG
-import java.io.File
 
 
 @SuppressLint("StaticFieldLeak")
@@ -79,6 +78,7 @@ object XposedLogger {
         fun info(text: String, tag: String = TAG) {
             if (BuildConfig.DEBUG) {
                 Log.i(tag, text)
+                FileLogger.getInstance()?.log("$tag\tI\t$text")
             }
             if (logToXposed) {
                 i(text)
@@ -88,6 +88,7 @@ object XposedLogger {
         fun error(text: String, tag: String = TAG) {
             if (BuildConfig.DEBUG) {
                 Log.e(tag, text)
+                FileLogger.getInstance()?.log("$tag\tE\t$text")
             }
             if (logToXposed) {
                 e(text)
@@ -96,27 +97,34 @@ object XposedLogger {
     }
 }
 
+
 fun debuggable() = BuildConfig.DEBUG
 
 inline fun logcat(logToXposed: Boolean = false, block: XposedLogger.Wrapper.() -> Unit) {
     if (!BuildConfig.DEBUG && !logToXposed) {
         return
     }
-    block(XposedLogger.Wrapper(logToXposed))
+    synchronized(TAG) {
+        block(XposedLogger.Wrapper(logToXposed))
+    }
 }
 
 inline fun logcatInfo(tag: String = TAG, logToXposed: Boolean = false, block: () -> String) {
     if (!BuildConfig.DEBUG && !logToXposed) {
         return
     }
-    XposedLogger.Wrapper(logToXposed).info(block(), tag)
+    synchronized(TAG) {
+        XposedLogger.Wrapper(logToXposed).info(block(), tag)
+    }
 }
 
 inline fun logcatWarn(tag: String = TAG, logToXposed: Boolean = false, block: () -> String) {
     if (!BuildConfig.DEBUG && !logToXposed) {
         return
     }
-    XposedLogger.Wrapper(logToXposed).error(block(), tag)
+    synchronized(TAG) {
+        XposedLogger.Wrapper(logToXposed).error(block(), tag)
+    }
 }
 
 inline fun toast(crossinline block: () -> String) {
