@@ -257,6 +257,56 @@ private val getProviderMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     }
 }
 
+private val getExtrasMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "getExtras").also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
+private val setLatitudeMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "setLatitude", Double::class.java).also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
+private val setLongitudeMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "setLongitude", Double::class.java).also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
+private val setProviderMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "setProvider", String::class.java).also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
+private val setExtrasMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "setExtras", Bundle::class.java).also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
 private val latitudeFiled by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     try {
         return@lazy XposedHelpers.findFieldIfExists(Location::class.java, "mLatitudeDegrees").also {
@@ -339,11 +389,19 @@ internal fun Location.safeGetProvider(): String? {
     ) as? String
 }
 
+internal fun Location.safeGetExtras(): Bundle? {
+    return XposedBridge.invokeOriginalMethod(
+        getExtrasMethod,
+        this,
+        null
+    ) as? Bundle
+}
+
 internal fun Location.safeSetLatLng(latLng: CoordTransform.LatLng) {
     val old = safeGetLatLng()
     if (javaClass == Location::class.java) {
-        latitude = latLng.latitude
-        longitude = latLng.longitude
+        safeSetLatitude(latLng.latitude)
+        safeSetLongitude(latLng.longitude)
     } else {
         latitudeFiled?.set(this, latLng.latitude)
         longitudeField?.set(this, latLng.longitude)
@@ -358,10 +416,15 @@ internal fun Location.safeSetLatLng(latLng: CoordTransform.LatLng) {
 
 internal fun Location.safeSetExtras(extras: Bundle) {
     if (javaClass == Location::class.java) {
-        if (this.extras == null) {
-            this.extras = extras
+        val myExtras = safeGetExtras()
+        if (myExtras == null) {
+            XposedBridge.invokeOriginalMethod(
+                setExtrasMethod,
+                this,
+                arrayOf(extras)
+            )
         } else {
-            this.extras!!.putAll(extras)
+            myExtras.putAll(extras)
         }
     } else {
         if (XposedHelpers.findFieldIfExists(javaClass, "mExtras") != null) {
@@ -370,6 +433,30 @@ internal fun Location.safeSetExtras(extras: Bundle) {
             extrasField?.set(this, extras)
         }
     }
+}
+
+internal fun Location.safeSetLatitude(latitude: Double) {
+    XposedBridge.invokeOriginalMethod(
+        setLatitudeMethod,
+        this,
+        arrayOf(latitude)
+    )
+}
+
+internal fun Location.safeSetLongitude(longitude: Double) {
+    XposedBridge.invokeOriginalMethod(
+        setLongitudeMethod,
+        this,
+        arrayOf(longitude)
+    )
+}
+
+internal fun Location.safeSetProvider(provider: String) {
+    XposedBridge.invokeOriginalMethod(
+        setProviderMethod,
+        this,
+        arrayOf(provider)
+    )
 }
 
 
