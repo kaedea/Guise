@@ -87,7 +87,8 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                 mode = "transform"
                                                 location.wgs84ToGcj02()?.let {
                                                     location.safeSetLatLng(it)
-                                                    updateLastLatLng(it, "hookLocation#${method.name}-$mode").setTimes(location.safeGetTime(), location.safeGetElapsedRealtimeNanos())
+                                                    it.setTimes(location.safeGetTime(), location.safeGetElapsedRealtimeNanos())
+                                                    updateLastLatLng(it, "hookLocation#${method.name}-$mode")
                                                     when (method.name) {
                                                         "getLatitude" -> hookParam.result = it.latitude
                                                         "getLongitude" -> hookParam.result = it.longitude
@@ -115,7 +116,8 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                     mode = "fused-wsj84"
                                                     location.wgs84ToGcj02()?.let {
                                                         location.safeSetLatLng(it)
-                                                        updateLastLatLng(it, "hookLocation#${method.name}-$mode").setTimes(location.safeGetTime(), location.safeGetElapsedRealtimeNanos())
+                                                        it.setTimes(location.safeGetTime(), location.safeGetElapsedRealtimeNanos())
+                                                        updateLastLatLng(it, "hookLocation#${method.name}-$mode")
                                                         when (method.name) {
                                                             "getLatitude" -> hookParam.result = it.latitude
                                                             "getLongitude" -> hookParam.result = it.longitude
@@ -145,7 +147,8 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                         }
                                                     }
                                                     location.safeGetLatLng()?.let {
-                                                        updateLastLatLng(it, "hookLocation#${method.name}-$mode").setTimes(location.safeGetTime(), location.safeGetElapsedRealtimeNanos())
+                                                        it.setTimes(location.safeGetTime(), location.safeGetElapsedRealtimeNanos())
+                                                        updateLastLatLng(it, "hookLocation#${method.name}-$mode")
                                                     }
                                                 }
 
@@ -171,7 +174,8 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                 }
                                                 refineLatLng?.let {
                                                     location.safeSetLatLng(it)
-                                                    updateLastLatLng(it, "hookLocation#${method.name}-$mode").setTimes(location.safeGetTime(), location.safeGetElapsedRealtimeNanos())
+                                                    it.setTimes(location.safeGetTime(), location.safeGetElapsedRealtimeNanos())
+                                                    updateLastLatLng(it, "hookLocation#${method.name}-$mode")
                                                     when (method.name) {
                                                         "getLatitude" -> hookParam.result = it.latitude
                                                         "getLongitude" -> hookParam.result = it.longitude
@@ -531,7 +535,8 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                 }
                 it.wgs84ToGcj02()?.let { gcj02LatLng ->
                     if (keepAsLastLatLng) {
-                        updateLastLatLng(gcj02LatLng, source).setTimes(location.safeGetTime(), location.safeGetElapsedRealtimeNanos())
+                        gcj02LatLng.setTimes(location.safeGetTime(), location.safeGetElapsedRealtimeNanos())
+                        updateLastLatLng(gcj02LatLng, source)
                     }
                     if (keepAsLatestPureLocation) {
                         it.safeGetLatLng()?.let { wgs84LatLng ->
@@ -549,13 +554,15 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         last?.let { start ->
             logcat {
                 val distance = start.toDistance(latLng)
+                val speedMps = latLng.speedMps(start)
                 if (distance > 100.0f) {
-                    error("\tDRIFTING!! $distance, from: $source")
+                    error("\tDRIFTING!! $distance, speedMps=${speedMps}, from=$source")
                     if (System.currentTimeMillis() - initMs >= if (debuggable()) 30 * 1000L else 600 * 1000L) {
                         toast { "DRIFTING!! $distance" }
                     }
+                } else {
+                    error("\tmoving: $distance, speedMps=${speedMps}, from=$source")
                 }
-                error("\tmoving: $distance")
             }
         }
         return lastGcj02LatLng!!

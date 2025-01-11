@@ -10,6 +10,8 @@ import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import java.util.*
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 
 /**
  * @author Kaede
@@ -689,7 +691,8 @@ internal object CoordTransform {
     class LatLng {
         var latitude = 0.0
         var longitude = 0.0
-        var time = 0L
+        var hasTimes = false
+        var timeMs = 0L
         var elapsedRealtimeNanos = 0L
 
         constructor(latitude: Double, longitude: Double) {
@@ -700,7 +703,8 @@ internal object CoordTransform {
         constructor()
 
         fun setTimes(time: Long, elapsedRealtimeNanos: Long) {
-            this.time = time
+            this.hasTimes = true
+            this.timeMs = time
             this.elapsedRealtimeNanos = elapsedRealtimeNanos
         }
 
@@ -712,13 +716,25 @@ internal object CoordTransform {
         }
 
         override fun toString(): String {
-            return "LatLng(latitude=$latitude, longitude=$longitude, time=$time, elapsedRealtimeNanos=$elapsedRealtimeNanos)"
+            return "LatLng(latitude=$latitude, longitude=$longitude, time=$timeMs, elapsedRealtimeNanos=$elapsedRealtimeNanos)"
         }
 
         fun toDistance(end: LatLng): Float {
             val floats = floatArrayOf(-1f)
             Location.distanceBetween(this.latitude, this.longitude, end.latitude, end.longitude, floats)
             return floats[0]
+        }
+
+        fun speedMps(last: LatLng): Float {
+            if (!this.hasTimes || !last.hasTimes) {
+                return -1F
+            }
+            val sec = TimeUnit.MILLISECONDS.toSeconds(abs(this.timeMs - last.timeMs))
+            if (sec <= 0) {
+                return -2F
+            }
+            val distance = toDistance(last)
+            return distance / sec
         }
     }
 }
