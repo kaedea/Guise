@@ -100,6 +100,7 @@ internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null)
         //  - fixups=true
         //  - Suddenly drifting of about 629 meters (diff of wgs-84 & gcj-02 in the same real position)
         // Only god knows how do the following codes work!
+        val extras = safeGetExtras()
         if (extras?.containsKey("locationType") == true && extras!!.getInt("locationType", -1) != 3) {
             logcatInfo { "\tno: locationType=${extras!!.containsKey("locationType")}" }
         } else {
