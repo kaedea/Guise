@@ -11,6 +11,7 @@ import com.houvven.ktx_xposed.logger.*
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import java.util.*
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBase(config) {
@@ -86,7 +87,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                 mode = "transform"
                                                 location.wgs84ToGcj02()?.let {
                                                     location.safeSetLatLng(it)
-                                                    updateLastLatLng(it, "hookLocation#${method.name}-$mode").setTimes(location.time, location.elapsedRealtimeNanos)
+                                                    updateLastLatLng(it, "hookLocation#${method.name}-$mode").setTimes(location.safeGetTime(), location.safeGetElapsedRealtimeNanos())
                                                     when (method.name) {
                                                         "getLatitude" -> hookParam.result = it.latitude
                                                         "getLongitude" -> hookParam.result = it.longitude
@@ -114,7 +115,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                     mode = "fused-wsj84"
                                                     location.wgs84ToGcj02()?.let {
                                                         location.safeSetLatLng(it)
-                                                        updateLastLatLng(it, "hookLocation#${method.name}-$mode").setTimes(location.time, location.elapsedRealtimeNanos)
+                                                        updateLastLatLng(it, "hookLocation#${method.name}-$mode").setTimes(location.safeGetTime(), location.safeGetElapsedRealtimeNanos())
                                                         when (method.name) {
                                                             "getLatitude" -> hookParam.result = it.latitude
                                                             "getLongitude" -> hookParam.result = it.longitude
@@ -144,7 +145,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                         }
                                                     }
                                                     location.safeGetLatLng()?.let {
-                                                        updateLastLatLng(it, "hookLocation#${method.name}-$mode").setTimes(location.time, location.elapsedRealtimeNanos)
+                                                        updateLastLatLng(it, "hookLocation#${method.name}-$mode").setTimes(location.safeGetTime(), location.safeGetElapsedRealtimeNanos())
                                                     }
                                                 }
 
@@ -154,21 +155,23 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                     mode = "reverse"
                                                 } else {
                                                     // Try pass by the last gcj-02 location
+                                                    val currNanos = location.safeGetElapsedRealtimeNanos()
                                                     if (lastGcj02LatLng != null &&
-                                                        Math.abs(location.elapsedRealtimeNanos - lastGcj02LatLng!!.elapsedRealtimeNanos) in 0..10 * 1000000L) { // 10s
+                                                        TimeUnit.NANOSECONDS.toSeconds(abs(currNanos - lastGcj02LatLng!!.elapsedRealtimeNanos)) in 0..10L  // 10s
+                                                    ) {
                                                         mode = "cache"
                                                         refineLatLng = lastGcj02LatLng
                                                     } else {
                                                         logcatInfo {
-                                                            "\ttime ago: ${location.elapsedRealtimeNanos} - ${lastGcj02LatLng?.elapsedRealtimeNanos} = " +
-                                                                    "${(location.elapsedRealtimeNanos - (lastGcj02LatLng?.elapsedRealtimeNanos ?: 0)) / (10 * 1000000L)} s"
+                                                            "\ttime ago: $currNanos - ${lastGcj02LatLng?.elapsedRealtimeNanos} = " +
+                                                                    "${TimeUnit.NANOSECONDS.toSeconds((currNanos - (lastGcj02LatLng?.elapsedRealtimeNanos ?: 0)))} s"
                                                         }
                                                         mode = "unknown"
                                                     }
                                                 }
                                                 refineLatLng?.let {
                                                     location.safeSetLatLng(it)
-                                                    updateLastLatLng(it, "hookLocation#${method.name}-$mode").setTimes(location.time, location.elapsedRealtimeNanos)
+                                                    updateLastLatLng(it, "hookLocation#${method.name}-$mode").setTimes(location.safeGetTime(), location.safeGetElapsedRealtimeNanos())
                                                     when (method.name) {
                                                         "getLatitude" -> hookParam.result = it.latitude
                                                         "getLongitude" -> hookParam.result = it.longitude
@@ -528,7 +531,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                 }
                 it.wgs84ToGcj02()?.let { gcj02LatLng ->
                     if (keepAsLastLatLng) {
-                        updateLastLatLng(gcj02LatLng, source).setTimes(location.time, location.elapsedRealtimeNanos)
+                        updateLastLatLng(gcj02LatLng, source).setTimes(location.safeGetTime(), location.safeGetElapsedRealtimeNanos())
                     }
                     if (keepAsLatestPureLocation) {
                         it.safeGetLatLng()?.let { wgs84LatLng ->

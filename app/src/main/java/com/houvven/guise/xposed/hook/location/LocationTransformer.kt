@@ -273,6 +273,27 @@ private val getExtrasMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     }
 }
 
+private val getTimeMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "getTime").also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
+private val getElapsedRealtimeNanosMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "getElapsedRealtimeNanos").also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
+
 private val setLatitudeMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     try {
         return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "setLatitude", Double::class.java).also {
@@ -401,6 +422,22 @@ internal fun Location.safeGetExtras(): Bundle? {
         this,
         null
     ) as? Bundle
+}
+
+internal fun Location.safeGetTime(): Long {
+    return XposedBridge.invokeOriginalMethod(
+        getTimeMethod,
+        this,
+        null
+    ) as? Long ?: 0L
+}
+
+internal fun Location.safeGetElapsedRealtimeNanos(): Long {
+    return XposedBridge.invokeOriginalMethod(
+        getElapsedRealtimeNanosMethod,
+        this,
+        null
+    ) as? Long ?: 0L
 }
 
 internal fun Location.safeSetLatLng(latLng: CoordTransform.LatLng) {
