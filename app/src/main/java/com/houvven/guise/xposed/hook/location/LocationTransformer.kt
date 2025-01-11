@@ -4,6 +4,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import com.houvven.ktx_xposed.logger.debuggable
 import com.houvven.ktx_xposed.logger.logcat
 import com.houvven.ktx_xposed.logger.logcatInfo
 import de.robv.android.xposed.XposedBridge
@@ -64,7 +65,7 @@ internal fun Location.isGcj02Location(): Boolean {
     return extras != null && extras!!.getBoolean("wgs2gcj", false)
 }
 
-internal fun Location.shouldTransform(): Boolean {
+private fun Location.shouldTransform(): Boolean {
     val shouldRefreshing = mBoundingRef.second <= 0L || System.currentTimeMillis() - mBoundingRef.second >= BOUNDING_REFRESH_MS
     if (shouldRefreshing) {
         logcatInfo { "checkIfBounded: post" }
@@ -76,9 +77,20 @@ internal fun Location.shouldTransform(): Boolean {
     return mBoundingRef.first
 }
 
-internal fun Location.isTransformable(): Boolean {
-    if (safeGetProvider() == LocationManager.GPS_PROVIDER || safeGetProvider() == LocationManager.NETWORK_PROVIDER) {
+internal fun Location.isTransformable(fromPassive: Boolean = false): Boolean {
+    if (!shouldTransform()) {
+        logcatInfo { "shouldTransform: false, outOfBounds" }
+        return false
+    }
+    if (safeGetProvider() == LocationManager.GPS_PROVIDER) {
         return true
+    }
+    if (safeGetProvider() == LocationManager.NETWORK_PROVIDER) {
+        // fromPassive=true means that this location is not retrieved by LocationListener.
+        // Tt could be produced by LocationListener of other process.
+        // In this case we consider this type of network location as not-transformable, which we should
+        // check if reliable or not.
+        return !fromPassive
     }
     // if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && provider == LocationManager.FUSED_PROVIDER) {
     //     // Fused Location (both Location & GmmLocation) might has been transformed
@@ -89,6 +101,10 @@ internal fun Location.isTransformable(): Boolean {
 }
 
 internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null): Boolean {
+    // A reliable fused location means:
+    //   1. the location has been transformed into gcj02
+    //   2. should transform again
+    //   3. avoid to apply unreliable fused location
     logcatInfo { "isReliableFused: last=$lastLatLng" }
     if (!CHECK_FUSE_RELIABLE) {
         return true
@@ -159,8 +175,9 @@ internal fun Location.tryReverseTransform(lastLatLng: CoordTransform.LatLng?): C
  */
 internal fun Location.isFixUps(): Boolean {
     if (javaClass != Location::class.java) {
-        if (extras != null && extras!!.containsKey("isFixUps")) {
-            return extras!!.getBoolean("isFixUps", false)
+        val extras = safeGetExtras()
+        if (extras != null && extras.containsKey("isFixUps")) {
+            return extras.getBoolean("isFixUps", false)
         }
         return toString().contains("fixups=true").also { isFixUps ->
             safeSetExtras(let bundle@{
@@ -190,7 +207,9 @@ internal fun Location.getLocationGcj02(): CoordTransform.LatLng? {
 internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
     logcatInfo { "wgs84ToGcj02@${myHashcode()}: $this" }
     if (!isTransformable() || isGcj02Location() || isFixUps()) {
-        throw IllegalStateException("isTransformable=${isTransformable()}, isGcj02=${isGcj02Location()}, isFixUps=${isFixUps()}")
+        if (debuggable()) {
+            throw IllegalStateException("isTransformable=${isTransformable()}, isGcj02=${isGcj02Location()}, isFixUps=${isFixUps()}")
+        }
     }
     val oldLatLng = safeGetLatLng()
     val newLatLng = oldLatLng?.let {

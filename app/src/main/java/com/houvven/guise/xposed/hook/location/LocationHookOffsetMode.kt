@@ -82,35 +82,52 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                     val lastLatLng = lastGcj02LatLng
                                     val old = hookParam.result
                                     if (!location.isGcj02Location()) {
-                                        if (location.isTransformable() && location.safeGetProvider() != LocationManager.NETWORK_PROVIDER) {
-                                            if (location.shouldTransform()) {
-                                                mode = "transform"
-                                                location.wgs84ToGcj02()?.let {
-                                                    location.safeSetLatLng(it)
-                                                    updateLastLatLng(it, "hookLocation#${method.name}-$mode")
-                                                    when (method.name) {
-                                                        "getLatitude" -> hookParam.result = it.latitude
-                                                        "getLongitude" -> hookParam.result = it.longitude
-                                                    }
+                                        if (location.isTransformable(true)) {
+                                            mode = "transform"
+                                            location.wgs84ToGcj02()?.let {
+                                                location.safeSetLatLng(it)
+                                                updateLastLatLng(it, "hookLocation#${method.name}-$mode")
+                                                when (method.name) {
+                                                    "getLatitude" -> hookParam.result = it.latitude
+                                                    "getLongitude" -> hookParam.result = it.longitude
                                                 }
-                                            } else {
-                                                mode = "out-of-bounds"
                                             }
                                         } else {
                                             if (location.isReliableFused(lastGcj02LatLng)) {
                                                 var isWgs84Fused = false
-                                                if (latestPureLocation != null) {
+                                                var isGcj02Fused = false
+                                                val block = checkWgs84FusedOrGcj02Fused@ {
                                                     val currLatLng = location.safeGetLatLng()
                                                     if (currLatLng != null) {
-                                                        val distanceToWgs84 = currLatLng.toDistance(latestPureLocation!!.first)
-                                                        val distanceToGcj02 = currLatLng.toDistance(latestPureLocation!!.second)
-                                                        if (abs(distanceToWgs84) < abs(distanceToGcj02)) {
-                                                            if (abs(distanceToWgs84) <= 20) { // tolerance
-                                                                isWgs84Fused = true
+                                                        run {
+                                                            val tolerance = 20 // tolerance(meter)
+                                                            val distanceToWgs84 = currLatLng.toDistance(latestPureLocation!!.first)
+                                                            val distanceToGcj02 = currLatLng.toDistance(latestPureLocation!!.second)
+                                                            if (abs(distanceToWgs84) <= tolerance || abs(distanceToGcj02) <= tolerance) {
+                                                                if (abs(distanceToWgs84) < abs(distanceToGcj02)) {
+                                                                    isWgs84Fused = true
+                                                                } else {
+                                                                    isGcj02Fused = true
+                                                                }
+                                                                return@checkWgs84FusedOrGcj02Fused
+                                                            }
+                                                        }
+                                                        run {
+                                                            val tolerance = 60 // tolerance(meterPerSec)
+                                                            val speedFromWgs84Mps = currLatLng.speedMps(latestPureLocation!!.first)
+                                                            val speedFromGcj02Mps = currLatLng.speedMps(latestPureLocation!!.second)
+                                                            if (abs(speedFromWgs84Mps) <= tolerance || abs(speedFromGcj02Mps) <= tolerance) {
+                                                                if (abs(speedFromWgs84Mps) < abs(speedFromGcj02Mps)) {
+                                                                    isWgs84Fused = true
+                                                                } else {
+                                                                    isGcj02Fused = true
+                                                                }
+                                                                return@checkWgs84FusedOrGcj02Fused
                                                             }
                                                         }
                                                     }
                                                 }
+                                                block()
                                                 if (isWgs84Fused) {
                                                     mode = "fused-wsj84"
                                                     location.wgs84ToGcj02()?.let {
@@ -122,16 +139,6 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                         }
                                                     }
                                                 } else {
-                                                    var isGcj02Fused = false
-                                                    if (lastGcj02LatLng != null) {
-                                                        val currLatLng = location.safeGetLatLng()
-                                                        if (currLatLng != null) {
-                                                            val delta = currLatLng.toDistance(lastGcj02LatLng!!)
-                                                            if (abs(delta) <= 20) {
-                                                                isGcj02Fused = true
-                                                            }
-                                                        }
-                                                    }
                                                     if (isGcj02Fused) {
                                                         mode = "fused-gcj02"
                                                     } else {
@@ -523,10 +530,6 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                 }
                 if (!location.isTransformable()) {
                     logcatInfo { "\tisTransformable: false" }
-                    return@also
-                }
-                if (!location.shouldTransform()) {
-                    logcatInfo { "\tshouldTransform: false" }
                     return@also
                 }
                 it.wgs84ToGcj02()?.let { gcj02LatLng ->
