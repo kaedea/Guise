@@ -195,6 +195,7 @@ internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
     val oldLatLng = safeGetLatLng()
     val newLatLng = oldLatLng?.let {
         return@let CoordTransform.wgs84ToGcj02(oldLatLng)?.also { outputLatLng ->
+            outputLatLng.setTimes(safeGetTime(), safeGetElapsedRealtimeNanos())
             safeSetLatLng(outputLatLng)
             safeSetExtras(let bundle@{
                 val bundle = if (it.extras != null) it.extras else Bundle()
@@ -370,44 +371,49 @@ private val extrasField by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
  * Avoid recursive hooking, because we might has hooked every apis of Location
  */
 internal fun Location.safeGetLatLng(): CoordTransform.LatLng? {
-    run {
-        if (getLatitudeMethod != null && getLongitudeMethod != null) {
-            val lat = XposedBridge.invokeOriginalMethod(
-                getLatitudeMethod,
-                this,
-                arrayOf()
-            ) as? Double
-            val lng = XposedBridge.invokeOriginalMethod(
-                getLongitudeMethod,
-                this,
-                arrayOf()
-            ) as? Double
+    val toLatLng = toLatLng@ {
+        run {
+            if (getLatitudeMethod != null && getLongitudeMethod != null) {
+                val lat = XposedBridge.invokeOriginalMethod(
+                    getLatitudeMethod,
+                    this,
+                    arrayOf()
+                ) as? Double
+                val lng = XposedBridge.invokeOriginalMethod(
+                    getLongitudeMethod,
+                    this,
+                    arrayOf()
+                ) as? Double
+                if (lat != null && lng != null) {
+                    return@toLatLng CoordTransform.LatLng(lat, lng)
+                }
+            }
+        }
+        run {
+            val lat = latitudeFiled?.get(this) as? Double
+            val lng = longitudeField?.get(this) as? Double
             if (lat != null && lng != null) {
-                return CoordTransform.LatLng(lat, lng)
+                return@toLatLng CoordTransform.LatLng(lat, lng)
             }
         }
-    }
-    run {
-        val lat = latitudeFiled?.get(this) as? Double
-        val lng = longitudeField?.get(this) as? Double
-        if (lat != null && lng != null) {
-            return CoordTransform.LatLng(lat, lng)
-        }
-    }
-    val raw = toString()
-    val symBgn = "Location[${safeGetProvider()} "
-    val symEnd = " "
-    if (raw.startsWith(symBgn)) {
-        val prefix = raw.substring(raw.indexOf(symBgn) + symBgn.length)
-        if (prefix.contains(symEnd)) {
-            val target = prefix.substring(0, prefix.indexOf(symEnd))
-            val split = target.split(",")
-            if (split.size == 2) {
-                return CoordTransform.LatLng(split[0].toDouble(), split[1].toDouble())
+        run {
+            val raw = toString()
+            val symBgn = "Location[${safeGetProvider()} "
+            val symEnd = " "
+            if (raw.startsWith(symBgn)) {
+                val prefix = raw.substring(raw.indexOf(symBgn) + symBgn.length)
+                if (prefix.contains(symEnd)) {
+                    val target = prefix.substring(0, prefix.indexOf(symEnd))
+                    val split = target.split(",")
+                    if (split.size == 2) {
+                        return@toLatLng CoordTransform.LatLng(split[0].toDouble(), split[1].toDouble())
+                    }
+                }
             }
         }
+        return@toLatLng null
     }
-    return null
+    return toLatLng()?.also { it.setTimes(safeGetTime(), safeGetElapsedRealtimeNanos()) }
 }
 
 internal fun Location.safeGetProvider(): String? {
