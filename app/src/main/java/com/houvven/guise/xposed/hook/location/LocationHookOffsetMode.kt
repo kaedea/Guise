@@ -536,15 +536,15 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
     }
 
     private fun hookProviderState() {
+        if (!debuggable()) {
+            return
+        }
         val methodList = mutableListOf<String>()
         val isLocationEnabledForUser = "isLocationEnabledForUser".also { methodList.add(it) }
-
         val isProviderEnabledForUser = "isProviderEnabledForUser".also { methodList.add(it) }
         val hasProvider = "hasProvider".also { methodList.add(it) }
-
         val getProviders = "getProviders".also { methodList.add(it) }
         val getAllProviders = "getAllProviders".also { methodList.add(it) }
-
         val getBestProvider = "getBestProvider".also { methodList.add(it) }
 
         LocationManager::class.java.apply {
@@ -561,10 +561,15 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                 //     info("\t\t$it")
                                 // }
                             }
-                            // when (hookParam.method.name) {
-                            //     isLocationEnabledForUser -> {}
-                            //     else -> logcatWarn { "Unknown method: ${hookParam.method}" }
-                            // }
+                            when (hookParam.method.name) {
+                                isLocationEnabledForUser -> {}
+                                isProviderEnabledForUser -> {}
+                                hasProvider -> {}
+                                getProviders -> {}
+                                getAllProviders -> {}
+                                getBestProvider -> {}
+                                // else -> logcatWarn { "Unknown method: ${hookParam.method}" }
+                            }
                         }
                     }
                 }
