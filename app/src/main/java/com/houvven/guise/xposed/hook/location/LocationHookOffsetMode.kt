@@ -81,7 +81,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                     val lastLatLng = lastGcj02LatLng
                                     val old = hookParam.result
                                     if (!location.isGcj02Location()) {
-                                        if (location.isTransformable()) {
+                                        if (location.isTransformable() && location.safeGetProvider() != LocationManager.NETWORK_PROVIDER) {
                                             if (location.shouldTransform()) {
                                                 mode = "transform"
                                                 location.wgs84ToGcj02()?.let {
@@ -97,23 +97,20 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                             }
                                         } else {
                                             if (location.isReliableFused(lastGcj02LatLng)) {
-                                                var isGcj02Fused = true
+                                                var isWgs84Fused = false
                                                 if (latestPureLocation != null) {
                                                     val currLatLng = location.safeGetLatLng()
                                                     if (currLatLng != null) {
                                                         val distanceToWgs84 = currLatLng.toDistance(latestPureLocation!!.first)
                                                         val distanceToGcj02 = currLatLng.toDistance(latestPureLocation!!.second)
                                                         if (abs(distanceToWgs84) < abs(distanceToGcj02)) {
-                                                            isGcj02Fused = false
+                                                            if (abs(distanceToWgs84) <= 20) { // tolerance
+                                                                isWgs84Fused = true
+                                                            }
                                                         }
                                                     }
                                                 }
-                                                if (isGcj02Fused) {
-                                                    mode = "fused-gcj02"
-                                                    location.safeGetLatLng()?.let {
-                                                        updateLastLatLng(it).setTimes(location.time, location.elapsedRealtimeNanos)
-                                                    }
-                                                } else{
+                                                if (isWgs84Fused) {
                                                     mode = "fused-wsj84"
                                                     location.wgs84ToGcj02()?.let {
                                                         location.safeSetLatLng(it)
@@ -122,6 +119,32 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                             "getLatitude" -> hookParam.result = it.latitude
                                                             "getLongitude" -> hookParam.result = it.longitude
                                                         }
+                                                    }
+                                                } else {
+                                                    var isGcj02Fused = false
+                                                    if (lastGcj02LatLng != null) {
+                                                        val currLatLng = location.safeGetLatLng()
+                                                        if (currLatLng != null) {
+                                                            val delta = currLatLng.toDistance(lastGcj02LatLng!!)
+                                                            if (abs(delta) <= 20) {
+                                                                isGcj02Fused = true
+                                                            }
+                                                        }
+                                                    }
+                                                    if (isGcj02Fused) {
+                                                        mode = "fused-gcj02"
+                                                    } else {
+                                                        mode = "fused-cache"
+                                                        lastGcj02LatLng?.let {
+                                                            location.safeSetLatLng(it)
+                                                            when (method.name) {
+                                                                "getLatitude" -> hookParam.result = it.latitude
+                                                                "getLongitude" -> hookParam.result = it.longitude
+                                                            }
+                                                        }
+                                                    }
+                                                    location.safeGetLatLng()?.let {
+                                                        updateLastLatLng(it, "hookLocation#${method.name}-$mode").setTimes(location.time, location.elapsedRealtimeNanos)
                                                     }
                                                 }
 
