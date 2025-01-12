@@ -8,6 +8,7 @@ import android.os.Process
 import com.houvven.ktx_xposed.logger.XposedLogger.TAG
 import java.io.File
 import java.io.FileWriter
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.LinkedBlockingQueue
@@ -31,6 +32,9 @@ internal class FileLogger private constructor(context: Context) {
             }
         }
 
+        /**
+         * Do NOT log with XposedLogger within FileLogger to avoid recursive logging
+         */
         private fun safeLog(text: String) {
             if (debuggable()) {
                 android.util.Log.i(TAG, text)
@@ -63,9 +67,17 @@ internal class FileLogger private constructor(context: Context) {
         if (!baseDir.exists()) {
             baseDir.mkdirs()
         }
-
-        // 启动日志写入线程
-        startLoggingThread()
+        try {
+            if (baseDir.canWrite()) {
+                // 启动日志写入线程
+                startLoggingThread()
+            } else {
+                throw IOException("canWrite=false, dir=${baseDir.absolutePath}")
+            }
+        } catch (e: Exception) {
+            safeLog("Init file logging failed: ${e.message}")
+            toast { "FileLoggingError" }
+        }
     }
 
     private fun startLoggingThread() {
@@ -116,7 +128,9 @@ internal class FileLogger private constructor(context: Context) {
     }
 
     fun log(message: String) {
-        logQueue.offer("${getLogPrefix()} $message")
+        if (isRunning) {
+            logQueue.offer("${getLogPrefix()} $message")
+        }
     }
 
     fun stop() {
