@@ -239,6 +239,8 @@ internal fun Location.wgs84ToGcj02(): CoordTransform.LatLng? {
             val originProvider = safeGetProvider()
             safeSetProvider("${originProvider}@gcj02")
 
+            accuracy += oldLatLng.toDistance(outputLatLng)
+
             synchronized(mGcj02Holder) {
                 mGcj02Holder.add(myHashcode())
             }
@@ -747,7 +749,7 @@ internal object CoordTransform {
         fun toDistance(end: LatLng): Float {
             val floats = floatArrayOf(-1f)
             Location.distanceBetween(this.latitude, this.longitude, end.latitude, end.longitude, floats)
-            return floats[0]
+            return floats[0].coerceAtLeast(0F)
         }
 
         fun speedMps(last: LatLng): Float {
