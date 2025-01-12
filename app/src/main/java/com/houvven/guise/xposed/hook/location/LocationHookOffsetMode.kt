@@ -69,6 +69,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                         synchronized(locker) {
                             (hookParam.thisObject as? Location)?.let { location ->
                                 logcat {
+                                    info("++++++++++++++++++")
                                     info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${method.name}@${location.myHashcode()}")
                                     info("\tfrom:")
                                     Throwable().stackTrace.forEach {
@@ -229,8 +230,11 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                 afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
                     synchronized(locker) {
                         (hookParam.result as? Location)?.let {
-                            logcatInfo { "onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${method.name}" }
-                            hookParam.result = modifyLocationToGcj02(
+                            logcat {
+                                info("++++++++++++++++++")
+                                info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                            }
+                        hookParam.result = modifyLocationToGcj02(
                                 it,
                                 "hookGetLastLocation-${method.name}",
                                 keepAsLastLatLng = true,
@@ -271,6 +275,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                             synchronized(locker) {
                                 val listener = hookParam.args[indexOf] as LocationListener
                                 logcat {
+                                    info("++++++++++++++++++")
                                     info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#$target, idx=$indexOf, listener=${listener.hashCode()}")
                                     info("\tfrom:")
                                     Throwable().stackTrace.forEach {
@@ -404,6 +409,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                             beforeHookedMethod(target, *paramsTypes) { hookParam ->
                                 synchronized(locker) {
                                     logcat {
+                                        info("++++++++++++++++++")
                                         info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
                                         info("\tfrom:")
                                         Throwable().stackTrace.forEach {
@@ -421,6 +427,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                             beforeHookedMethod(target, *paramsTypes) { hookParam ->
                                 synchronized(locker) {
                                     logcat {
+                                        info("++++++++++++++++++")
                                         info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
                                         info("\tfrom:")
                                         Throwable().stackTrace.forEach {
@@ -465,6 +472,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         "invoked: ${hookParam.method}"
                                     }
                                     logcat {
+                                        info("++++++++++++++++++")
                                         info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
                                         info("\tfrom:")
                                         Throwable().stackTrace.forEach {
@@ -485,6 +493,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         "invoked: ${hookParam.method}"
                                     }
                                     logcat {
+                                        info("++++++++++++++++++")
                                         info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
                                         info("\tfrom:")
                                         Throwable().stackTrace.forEach {
