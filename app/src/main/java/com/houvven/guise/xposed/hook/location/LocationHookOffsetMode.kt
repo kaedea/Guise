@@ -8,15 +8,18 @@ import android.os.Bundle
 import com.houvven.guise.xposed.config.ModuleConfig
 import com.houvven.ktx_xposed.hook.*
 import com.houvven.ktx_xposed.logger.*
+import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
+import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBase(config) {
     private val initMs = System.currentTimeMillis()
-    private val locker = this
+    private val locker by lazy { this }
+    private val simpleDateFormat by lazy { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
 
     private var lastGcj02LatLng: CoordTransform.LatLng? = null
         set(value) {
@@ -75,6 +78,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                     Throwable().stackTrace.forEach {
                                         info("\t\t$it")
                                     }
+                                    info("\ttime: ${simpleDateFormat.format(location.safeGetTime())}")
                                     info("\t$location")
                                     info("\tprovider: ${location.safeGetProvider()}")
                                 }
@@ -203,21 +207,51 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
 
                 // Hook the remaining apis for debug
                 if (debuggable() && !hasHook) {
-                    val target = method.name
-                    val paramsTypes = method.parameterTypes
-                    afterHookedMethod(target, *paramsTypes) { hookParam ->
-                        synchronized(locker) {
-                            logcat {
-                                val hashcode = (hookParam.thisObject as? Location)?.myHashcode() ?: "null"
-                                info("onMethodInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}@${hashcode}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
-                                // info("\tfrom:")
-                                // Throwable().stackTrace.forEach {
-                                //     info("\t\t$it")
-                                // }
+                    if (method.name.startsWith("set")) {
+                        val target = method.name
+                        val paramsTypes = method.parameterTypes
+                        afterHookedMethod(target, *paramsTypes) { hookParam ->
+                            synchronized(locker) {
+                                logcat {
+                                    val hashcode = (hookParam.thisObject as? Location)?.myHashcode() ?: "null"
+                                    info("onMethodInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}@${hashcode}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                    // info("\tfrom:")
+                                    // Throwable().stackTrace.forEach {
+                                    //     info("\t\t$it")
+                                    // }
+                                }
                             }
                         }
                     }
                 }
+            }
+
+            // Hook constructors for debug
+            if (debuggable()) {
+                XposedHelpers.findAndHookConstructor(
+                    this,
+                    this.javaClass.classLoader,
+                    String::class.java,
+                    object : XC_MethodHook() {
+                        override fun afterHookedMethod(hookParam: MethodHookParam) {
+                            logcat {
+                                info("onConstructorInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                            }
+                        }
+                    })
+
+                XposedHelpers.findAndHookConstructor(
+                    this,
+                    this.javaClass.classLoader,
+                    Location::class.java,
+                    object : XC_MethodHook() {
+                        override fun afterHookedMethod(hookParam: MethodHookParam) {
+                            logcat {
+                                info("onConstructorInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                            }
+                        }
+                    }
+                )
             }
         }
     }
@@ -229,13 +263,20 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
             }.forEach { method ->
                 afterHookedMethod(method.name, *method.parameterTypes) { hookParam ->
                     synchronized(locker) {
-                        (hookParam.result as? Location)?.let {
+                        (hookParam.result as? Location)?.let { location ->
                             logcat {
                                 info("++++++++++++++++++")
                                 info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                info("\tfrom:")
+                                Throwable().stackTrace.forEach {
+                                    info("\t\t$it")
+                                }
+                                info("\ttime: ${simpleDateFormat.format(location.safeGetTime())}")
+                                info("\t$location")
+                                info("\tprovider: ${location.safeGetProvider()}")
                             }
-                        hookParam.result = modifyLocationToGcj02(
-                                it,
+                            hookParam.result = modifyLocationToGcj02(
+                                location,
                                 "hookGetLastLocation-${method.name}",
                                 keepAsLastLatLng = true,
                                 keepAsLatestPureLocation = false
