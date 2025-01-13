@@ -23,6 +23,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         private const val LOCATION_EXPIRED_TIME_MS = 10 * 60 * 1000L // 10min
         private const val LOCATION_MOVE_DISTANCE_TOLERANCE = 20 // 20m
         private const val LOCATION_MOVE_SPEED_TOLERANCE = 60 // 60mps
+        private const val DEFAULT_PASSIVE_LOCATION_AS_WGS84 = true
     }
 
     private val initMs = System.currentTimeMillis()
@@ -304,7 +305,17 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         // WTF states
                                         val currMs = location.safeGetTime()
                                         logcatWarn { "\ttime ago: $currMs - ${lastGcj02LatLng?.timeMs} = ${TimeUnit.MILLISECONDS.toSeconds((currMs - (lastGcj02LatLng?.timeMs ?: 0)))}s" }
-                                        onRely("rely-unknown")
+                                        if (DEFAULT_PASSIVE_LOCATION_AS_WGS84) {
+                                            val pair = location.wgs84ToGcj02()?.also { (_, gcj02LatLng) ->
+                                                when (method.name) {
+                                                    "getLatitude" -> hookParam.result = gcj02LatLng.latitude
+                                                    "getLongitude" -> hookParam.result = gcj02LatLng.longitude
+                                                }
+                                            }
+                                            onTransForm("trans-unknown", pair?.second)
+                                        } else {
+                                            onRely("rely-unknown")
+                                        }
                                     }
                                 }
                             }
