@@ -4,7 +4,6 @@ import android.location.Location
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
-import com.houvven.ktx_xposed.logger.debuggable
 import com.houvven.ktx_xposed.logger.exit
 import com.houvven.ktx_xposed.logger.logcatInfo
 import java.util.*
@@ -17,8 +16,12 @@ import kotlin.math.abs
  * @since  21/2/2023
  */
 
-private const val BOUNDING_REFRESH_MS = 10 * 60 * 1000L
+private const val CHECK_PASSIVE_LOCATION_RELIABLE = true
+private const val UPDATE_ACCURACY = false
+private const val BOUNDING_REFRESH_MS = 10 * 60 * 1000L // 10min
+
 private var mBoundingRef: Pair<Boolean, Long> = Pair(true, 0L)
+
 internal fun Location.checkIfBounded(): Boolean {
     safeGetLatLng()?.let {
         return ChinaMapBounding.isInMainland(it.latitude, it.longitude)
@@ -44,13 +47,16 @@ private val mGcj02Holder by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         }
     }
 }
+
 internal fun Location.myHashcode(): Int {
     safeGetLatLng()?.let {
         return Objects.hash(safeGetProvider(), it.longitude, it.latitude)
     }
     return hashCode()
 }
+
 internal fun Location.isFakeLocation() = extras != null && extras!!.getBoolean("isFake", false)
+
 internal fun Location.isGcj02Location(): Boolean {
     synchronized (mGcj02Holder) {
         if (mGcj02Holder.contains(myHashcode())) {
@@ -63,7 +69,7 @@ internal fun Location.isGcj02Location(): Boolean {
     return extras != null && extras!!.getBoolean("wgs2gcj", false)
 }
 
-private fun Location.shouldTransform(): Boolean {
+internal fun Location.shouldTransform(): Boolean {
     val shouldRefreshing = mBoundingRef.second <= 0L || System.currentTimeMillis() - mBoundingRef.second >= BOUNDING_REFRESH_MS
     if (shouldRefreshing) {
         logcatInfo { "checkIfBounded: post" }
@@ -76,10 +82,6 @@ private fun Location.shouldTransform(): Boolean {
 }
 
 internal fun Location.isTransformable(fromPassive: Boolean = false): Boolean {
-    if (!shouldTransform()) {
-        logcatInfo { "shouldTransform: false, outOfBounds" }
-        return false
-    }
     if (safeGetProvider() == LocationManager.GPS_PROVIDER) {
         return true
     }
@@ -104,7 +106,7 @@ internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null)
     //   2. should transform again
     //   3. avoid to apply unreliable fused location
     logcatInfo { "isReliableFused: last=$lastLatLng" }
-    if (!CHECK_FUSE_RELIABLE) {
+    if (!CHECK_PASSIVE_LOCATION_RELIABLE) {
         return true
     }
     var reliable = false
@@ -156,17 +158,22 @@ internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null)
     return reliable
 }
 
-internal fun Location.tryReverseTransform(lastLatLng: CoordTransform.LatLng?): CoordTransform.LatLng? {
-    if (lastLatLng != null) {
+internal fun Location.tryReverseTransform(lastLatLng: CoordTransform.LatLng, tolerance: Int): CoordTransform.LatLng? {
+    if (isTransformedFrom(lastLatLng, tolerance)) {
         safeGetLatLng()?.let {
-            CoordTransform.wgs84ToGcj02(lastLatLng)?.let { twiceTransLatLng ->
-                if (twiceTransLatLng.toDistance(it) in 0.0..10.0) {
-                    return CoordTransform.gcj02ToWgs84(it)
-                }
-            }
+            return CoordTransform.gcj02ToWgs84(it)
         }
     }
     return null
+}
+
+internal fun Location.isTransformedFrom(fromLatLng: CoordTransform.LatLng, tolerance: Int): Boolean {
+    safeGetLatLng()?.let {
+        CoordTransform.wgs84ToGcj02(fromLatLng)?.let { toLatLng ->
+            return abs(toLatLng.toDistance(it)) <= tolerance
+        }
+    }
+    return false
 }
 
 /**
@@ -236,7 +243,9 @@ internal fun Location.wgs84ToGcj02(): Pair<CoordTransform.LatLng, CoordTransform
             val originProvider = safeGetProvider()
             safeSetProvider("${originProvider}@gcj02")
 
-            accuracy += oldLatLng.toDistance(outputLatLng)
+            if (UPDATE_ACCURACY) {
+                accuracy += oldLatLng.toDistance(outputLatLng)
+            }
 
             synchronized(mGcj02Holder) {
                 mGcj02Holder.add(myHashcode())

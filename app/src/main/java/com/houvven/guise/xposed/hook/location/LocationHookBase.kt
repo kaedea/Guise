@@ -14,7 +14,6 @@ import com.houvven.ktx_xposed.hook.*
 
 
 internal const val HOOK_LOCATION_LISTENER = true
-internal const val CHECK_FUSE_RELIABLE = true
 
 @Suppress("DEPRECATION")
 abstract class LocationHookBase(open val config: ModuleConfig) {
