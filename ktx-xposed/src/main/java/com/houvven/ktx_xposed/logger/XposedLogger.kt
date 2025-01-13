@@ -127,6 +127,17 @@ inline fun logcatWarn(tag: String = TAG, logToXposed: Boolean = false, block: ()
     }
 }
 
+inline fun exit(tag: String = TAG, logToXposed: Boolean = false, block: () -> Throwable) {
+    logcatWarn(tag, logToXposed) {
+        block().message ?: "Error"
+    }
+    if (!BuildConfig.DEBUG) {
+        Log.e(TAG, "Error", block())
+        Runtime.getRuntime().exit(-1)
+        return
+    }
+}
+
 inline fun toast(crossinline block: () -> String) {
     if (!BuildConfig.DEBUG || AndroidAppHelper.currentApplication() == null) {
         return
