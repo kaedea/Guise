@@ -144,21 +144,35 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         }
                                     }
 
+                                    // Handle passive location:
+                                    //  1. passive-location will be effected by transforming of up-stream locations
+                                    //  2. there are 3 states that the current passive-location may be:
+                                    //    - transformable(wgs-84), which should be transformed into gcj-02
+                                    //    - transformed(gcj-02), which we rely it and do nothing
+                                    //    - twice-transformed(gcj-02^2), which we reserve it into gcj-02
+                                    //  3. here we try to tell which state of this location by:
+                                    //    - provider & extras info
+                                    //    - latest pure location: infer the most nearly one
+                                    //    - last gcj-02 location: infer the most nearly one
                                     synchronized(location) {
+                                        // 1. Out of bounds
                                         if (!location.shouldTransform()) {
                                             onRely("rely-out-of-bounded")
                                             return@afterHookedMethod
                                         }
+                                        // 2. Expired
                                         if (location.isExpired(lastLatLng)) {
                                             onRely("rely-expired")
                                             return@afterHookedMethod
                                         }
+                                        // 3. Has been transformed into wgs-84
                                         if (location.isGcj02Location()) {
                                             onRely("rely-gcj02")
                                             return@afterHookedMethod
 
                                         }
 
+                                        // 4. Check if transformable
                                         if (location.isTransformable(true)) {
                                             val pair = location.wgs84ToGcj02()?.also { (_, gcj02LatLng) ->
                                                 when (method.name) {
@@ -170,6 +184,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                             return@afterHookedMethod
                                         }
 
+                                        // 5. Compare to latest pure location
                                         if (location.isReliableFused(lastLatLng)) {
                                             val currLatLng = location.safeGetLatLng()
                                             val latestPureLocation = getLatestPureLatLng()
@@ -237,54 +252,46 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                     }
                                                 }
                                             }
-
-                                            // // Try pass by the last gcj-02 location
-                                            // lastGcj02LatLng?.let {
-                                            //     location.safeSetLatLng(it)
-                                            //     when (method.name) {
-                                            //         "getLatitude" -> hookParam.result = it.latitude
-                                            //         "getLongitude" -> hookParam.result = it.longitude
-                                            //     }
-                                            // }
-                                            // onDrop("fused-cache")
-                                            // return@afterHookedMethod
                                         }
 
+                                        // 6. Compare to last gjc-02
                                         run {
-                                            if (lastLatLng != null) {
-                                                val tolerance = LOCATION_MOVE_DISTANCE_TOLERANCE // tolerance(meter)
-                                                val reversedLatLng = location.tryReverseTransform(lastLatLng, tolerance)
-                                                reversedLatLng?.let {
-                                                    location.safeSetLatLng(it)
-                                                    when (method.name) {
-                                                        "getLatitude" -> hookParam.result = it.latitude
-                                                        "getLongitude" -> hookParam.result = it.longitude
+                                            run {
+                                                if (lastLatLng != null) {
+                                                    val tolerance = LOCATION_MOVE_DISTANCE_TOLERANCE // tolerance(meter)
+                                                    val reversedLatLng = location.tryReverseTransform(lastLatLng, tolerance)
+                                                    reversedLatLng?.let {
+                                                        location.safeSetLatLng(it)
+                                                        when (method.name) {
+                                                            "getLatitude" -> hookParam.result = it.latitude
+                                                            "getLongitude" -> hookParam.result = it.longitude
+                                                        }
+                                                        onTransForm("trans-last-reverse", it)
+                                                        return@afterHookedMethod
                                                     }
-                                                    onTransForm("trans-last-reverse", it)
-                                                    return@afterHookedMethod
                                                 }
                                             }
-                                        }
-
-                                        run {
-                                            if (lastLatLng != null) {
-                                                location.safeGetLatLng()?.let { currLatLng ->
-                                                    val distanceToGcj02 = currLatLng.toDistance(lastLatLng)
-                                                    logcatInfo { "\tdistanceToLast: gcj02=$distanceToGcj02" }
-                                                    if (abs(distanceToGcj02) <= LOCATION_MOVE_DISTANCE_TOLERANCE) {
-                                                        onRely("rely-last-distance")
-                                                        return@afterHookedMethod
-                                                    }
-                                                    val speedFromGcj02Mps = currLatLng.speedMps(lastLatLng)
-                                                    logcatInfo { "\tspeedToLast: gcj02=$speedFromGcj02Mps" }
-                                                    if (abs(speedFromGcj02Mps) <= LOCATION_MOVE_SPEED_TOLERANCE) {
-                                                        onRely("rely-last-speed")
-                                                        return@afterHookedMethod
+                                            run {
+                                                if (lastLatLng != null) {
+                                                    location.safeGetLatLng()?.let { currLatLng ->
+                                                        val distanceToGcj02 = currLatLng.toDistance(lastLatLng)
+                                                        logcatInfo { "\tdistanceToLast: gcj02=$distanceToGcj02" }
+                                                        if (abs(distanceToGcj02) <= LOCATION_MOVE_DISTANCE_TOLERANCE) {
+                                                            onRely("rely-last-distance")
+                                                            return@afterHookedMethod
+                                                        }
+                                                        val speedFromGcj02Mps = currLatLng.speedMps(lastLatLng)
+                                                        logcatInfo { "\tspeedToLast: gcj02=$speedFromGcj02Mps" }
+                                                        if (abs(speedFromGcj02Mps) <= LOCATION_MOVE_SPEED_TOLERANCE) {
+                                                            onRely("rely-last-speed")
+                                                            return@afterHookedMethod
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
 
+                                        // 7. Caching by last gjc-02
                                         run {
                                             // Try pass by the last gcj-02 location as cache
                                             val currMs = location.safeGetTime()
@@ -302,7 +309,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                             }
                                         }
 
-                                        // WTF states
+                                        // *. WTF states
                                         val currMs = location.safeGetTime()
                                         logcatWarn { "\ttime ago: $currMs - ${lastGcj02LatLng?.timeMs} = ${TimeUnit.MILLISECONDS.toSeconds((currMs - (lastGcj02LatLng?.timeMs ?: 0)))}s" }
                                         if (DEFAULT_PASSIVE_LOCATION_AS_WGS84) {
