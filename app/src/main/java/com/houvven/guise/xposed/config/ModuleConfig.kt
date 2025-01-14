@@ -37,6 +37,7 @@ data class ModuleConfig(
     var fixMediaLocationDrift: Boolean = false,
     var makeWifiLocationFail: Boolean = false,
     var makeCellLocationFail: Boolean = false,
+    var makePassiveLocationFail: Boolean = false,
 
     var versionCode: Int = -1,
     var versionName: String = "",

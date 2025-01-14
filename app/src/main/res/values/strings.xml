@@ -56,6 +56,8 @@
     <string name="location_fix_gogle_map_drift">Fix Google Map Drift</string>
     <string name="location_fix_media_drift">Fix Media Location Drift</string>
     <string name="location_wifi_fail">Invalidate WiFi location</string>
+    <string name="location_mobile_fail">Invalidate Mobile location</string>
+    <string name="location_passive_fail">Invalidate Passive location</string>
 
     <string name="build_config_version_name">Version Name</string>
     <string name="build_config_version_code">Version Code</string>

@@ -187,8 +187,8 @@ private fun ConfigEditorItems(state: ModuleConfigState, launch: () -> Unit) {
     ContainerSwitch(state.fixGoogleMapDrift, stringResource(R.string.location_fix_gogle_map_drift))
     ContainerSwitch(state.fixMediaLocationDrift, stringResource(R.string.location_fix_media_drift))
     ContainerSwitch(state.makeWifiLocationFail, stringResource(R.string.location_wifi_fail))
-    ContainerSwitch(state.makeCellLocationFail, label = "使基站位置信息失效") // TODO:  国际化
-
+    ContainerSwitch(state.makeCellLocationFail, stringResource(R.string.location_mobile_fail))
+    ContainerSwitch(state.makePassiveLocationFail, stringResource(R.string.location_passive_fail))
 
     Title(text = stringResource(R.string.title_build_config))
     InputBox(state.versionCode, stringResource(R.string.build_config_version_code))

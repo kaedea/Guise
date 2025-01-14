@@ -55,15 +55,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         hookLocationListener()
         // hookILocationListenerOfSystemService()
 
-        // Others
-        if (config.makeWifiLocationFail) {
-            makeWifiLocationFail()
-        }
-        if (config.makeCellLocationFail) {
-            makeCellLocationFail()
-            makeTelLocationFail()
-        }
-
+        // Providers
         hookProviderState()
 
         // GPS
@@ -74,6 +66,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
     }
 
     private fun hookLocation() {
+        logcatInfo { "hookLocation" }
         Location::class.java.run {
             for (method in declaredMethods) {
                 var hasHook = false
@@ -400,6 +393,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
     }
 
     private fun hookGetLastLocation() {
+        logcatInfo { "hookGetLastLocation" }
         LocationManager::class.java.run {
             declaredMethods.filter {
                 (it.name == "getLastLocation" || it.name == "getLastKnownLocation") && it.returnType == Location::class.java
@@ -435,6 +429,8 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
     }
 
     private fun hookLocationUpdateRequest() {
+        logcatInfo { "hookLocationUpdateRequest" }
+
         val requestLocationUpdates = "requestLocationUpdates"
         val requestSingleUpdate = "requestSingleUpdate"
         val removeUpdates = "removeUpdates"
@@ -585,6 +581,9 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         if (!HOOK_LOCATION_LISTENER) {
             return
         }
+
+        logcatInfo { "hookLocationListener" }
+
         val onLocationChanged = "onLocationChanged"
         LocationListener::class.java.run {
             for (method in declaredMethods) {
@@ -647,6 +646,9 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         if (!HOOK_LOCATION_LISTENER) {
             return
         }
+
+        logcatInfo { "hookILocationListenerOfSystemService" }
+
         val onLocationChanged = "onLocationChanged"
         XposedHelpers.findClassIfExists("android.location.ILocationListener", LocationListener::class.java.classLoader)?.run {
             for (method in declaredMethods) {
@@ -716,9 +718,31 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
     }
 
     private fun hookProviderState() {
-        if (!debuggable()) {
+        logcatInfo { "hookProviderState" }
+
+        val disabledProviderList: List<String> = run {
+            val providers = mutableListOf<String>()
+            if (config.makeWifiLocationFail) {
+                makeWifiLocationFail()
+            }
+            if (config.makeCellLocationFail) {
+                makeCellLocationFail()
+                makeTelLocationFail()
+            }
+            if (config.makeWifiLocationFail && config.makeCellLocationFail) {
+                providers.add(LocationManager.NETWORK_PROVIDER)
+            }
+            if (config.makePassiveLocationFail) {
+                providers.add(LocationManager.PASSIVE_PROVIDER)
+            }
+            return@run if (providers.isEmpty()) emptyList<String>() else providers.toList()
+        }
+
+        logcatInfo { "hookProviderState: disabled=${disabledProviderList}" }
+        if (disabledProviderList.isEmpty() && !debuggable()) {
             return
         }
+
         val methodList = mutableListOf<String>()
         val isLocationEnabledForUser = "isLocationEnabledForUser".also { methodList.add(it) }
         val isProviderEnabledForUser = "isProviderEnabledForUser".also { methodList.add(it) }
@@ -735,7 +759,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                     afterHookedMethod(target, *paramsTypes) { hookParam ->
                         synchronized(locker) {
                             logcat {
-                                info("onMethodInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
                                 // info("\tfrom:")
                                 // Throwable().stackTrace.forEach {
                                 //     info("\t\t$it")
@@ -743,43 +767,42 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                             }
                             when (hookParam.method.name) {
                                 isLocationEnabledForUser -> {}
-                                isProviderEnabledForUser -> {}
-                                hasProvider -> {}
-                                getProviders -> {}
-                                getAllProviders -> {}
-                                getBestProvider -> {}
+                                isProviderEnabledForUser, hasProvider -> {
+                                    if (disabledProviderList.isNotEmpty()) {
+                                        val provider = hookParam.args.find { it is String }
+                                        if (provider in disabledProviderList) {
+                                            hookParam.result = false
+                                        }
+                                    }
+                                }
+                                getProviders, getAllProviders -> {
+                                    if (disabledProviderList.isNotEmpty()) {
+                                        val provider = hookParam.args.find { it is String }
+                                        if (provider in disabledProviderList) {
+                                            val providers = hookParam.result as List<*>
+                                            if (provider in providers) {
+                                                @Suppress("UNCHECKED_CAST")
+                                                val newProviders = providers.toMutableList() as MutableList<String>
+                                                newProviders.remove(provider)
+                                                hookParam.result = newProviders
+                                            }
+                                        }
+                                    }
+                                }
+                                getBestProvider -> {
+                                    if (disabledProviderList.isNotEmpty()) {
+                                        val provider = hookParam.result as? String
+                                        if (provider in disabledProviderList) {
+                                            hookParam.result = null
+                                        }
+                                    }
+                                }
                                 // else -> logcatWarn { "Unknown method: ${hookParam.method}" }
                             }
                         }
                     }
                 }
             }
-
-            // setMethodResult(
-            //     methodName = "isLocationEnabledForUser",
-            //     value = true,
-            //     parameterTypes = arrayOf(UserHandle::class.java)
-            // )
-            // beforeHookSomeSameNameMethod(
-            //     "isProviderEnabledForUser", "hasProvider"
-            // ) {
-            //     when (it.args[0] as String) {
-            //         LocationManager.GPS_PROVIDER -> it.result = true
-            //         LocationManager.FUSED_PROVIDER,
-            //         LocationManager.NETWORK_PROVIDER,
-            //         LocationManager.PASSIVE_PROVIDER,
-            //         -> it.result = false
-            //     }
-            // }
-            // setSomeSameNameMethodResult(
-            //     "getProviders", "getAllProviders",
-            //     value = listOf(LocationManager.GPS_PROVIDER)
-            // )
-            // setMethodResult(
-            //     methodName = "getBestProvider",
-            //     value = LocationManager.GPS_PROVIDER,
-            //     parameterTypes = arrayOf(Criteria::class.java, Boolean::class.java)
-            // )
         }
     }
 

@@ -38,6 +38,7 @@ class ModuleConfigState private constructor(moduleConfig: ModuleConfig) {
     lateinit var fixMediaLocationDrift: MutableState<Boolean>
     lateinit var makeWifiLocationFail: MutableState<Boolean>
     lateinit var makeCellLocationFail: MutableState<Boolean>
+    lateinit var makePassiveLocationFail: MutableState<Boolean>
 
     lateinit var versionCode: MutableState<String>
     lateinit var versionName: MutableState<String>
