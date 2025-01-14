@@ -21,7 +21,7 @@ import kotlin.math.abs
 class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBase(config) {
     companion object {
         private const val LOCATION_EXPIRED_TIME_MS = 10 * 60 * 1000L           // 10min
-        private const val LOCATION_LAST_GCJ02_EXPIRED_TIME_MS = 1 * 60 * 1000L // 1min
+        private const val LOCATION_LAST_GCJ02_CACHING_MS = 5 * 60 * 1000L // 5min
 
         private const val PASSIVE_LOCATION_HOOK = true
         private const val PASSIVE_LOCATION_ALWAYS_AS_GCJ02 = false
@@ -374,7 +374,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         run {
                                             // Try pass by the last gcj-02 location as cache
                                             val currMs = location.safeGetTime()
-                                            if (lastLatLng != null && abs(currMs - lastLatLng.timeMs) <= LOCATION_LAST_GCJ02_EXPIRED_TIME_MS) {
+                                            if (lastLatLng != null && abs(currMs - lastLatLng.timeMs) <= LOCATION_LAST_GCJ02_CACHING_MS) {
                                                 val mode = "drop-cache"
                                                 lastLatLng.let {
                                                     location.safeSetLatLng(it)
