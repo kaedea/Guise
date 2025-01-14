@@ -209,29 +209,33 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         if (location.isReliableFused(lastLatLng)) {
                                             val latestPureLocation = getLatestPureLatLng()
                                             if (currLatLng == null || latestPureLocation == null) {
-                                                logcatWarn { "\tdistanceToPure: currLatLng=$currLatLng, latestPureLocation=$latestPureLocation" }
+                                                logcatWarn { "\tcompareToPure: skip, currLatLng=$currLatLng, latestPureLocation=$latestPureLocation" }
 
                                             } else {
                                                 // Compare speed & bearing
                                                 run {
                                                     val speedFromWgs84Mps = currLatLng.speedMpsFrom(latestPureLocation.first)
                                                     val speedFromGcj02Mps = currLatLng.speedMpsFrom(latestPureLocation.second)
-                                                    logcatInfo { "\tspeedToPure: wgs84=$speedFromWgs84Mps, gcj02=$speedFromGcj02Mps" }
+                                                    logcatInfo { "\tspeedFromPure: wgs84=$speedFromWgs84Mps, gcj02=$speedFromGcj02Mps" }
 
                                                     if (speedFromWgs84Mps == null || speedFromGcj02Mps == null) {
                                                         return@run
                                                     }
 
                                                     val speedTolerance = LOCATION_MOVE_SPEED_TOLERANCE // tolerance(meterPerSec)
-                                                    val bearingTolerance = LOCATION_MOVE_DIRECTION_TOLERANCE // degree(0~360)
+                                                    val speedFromWgs84Delta = abs(speedFromWgs84Mps - latestPureLocation.first.speed)
+                                                    val speedFromGcj02Delta = abs(speedFromGcj02Mps - latestPureLocation.second.speed)
 
                                                     if (latestPureLocation.first.hasSpeedAndBearing && latestPureLocation.second.hasSpeedAndBearing) {
                                                         val bearingFromWgs84 = Location("bearing").also { it.safeSetLatLng(latestPureLocation.first) }.bearingTo(location)
                                                         val bearingFromGcj02 = Location("bearing").also { it.safeSetLatLng(latestPureLocation.second) }.bearingTo(location)
                                                         logcatInfo { "\tbearingFromPure: wgs84=$bearingFromWgs84, gcj02=$bearingFromGcj02" }
 
-                                                        if (abs(speedFromWgs84Mps - latestPureLocation.first.speed) <= speedTolerance
-                                                            && abs(bearingFromWgs84 - latestPureLocation.first.bearing) <= bearingTolerance) {
+                                                        val bearingTolerance = LOCATION_MOVE_DIRECTION_TOLERANCE // degree(0~360)
+                                                        val bearingFromWgs84Delta = abs(bearingFromWgs84 - latestPureLocation.first.bearing)
+                                                        logcatInfo { "\twgs84Delta: speedDelta=$speedFromWgs84Delta, bearingDelta=$bearingFromWgs84Delta" }
+
+                                                        if (speedFromWgs84Delta <= speedTolerance && bearingFromWgs84Delta <= bearingTolerance) {
                                                             val pair = location.wgs84ToGcj02()?.also { (_, gcj02LatLng) ->
                                                                 when (method.name) {
                                                                     "getLatitude" -> hookParam.result = gcj02LatLng.latitude
@@ -241,16 +245,20 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                             onTransForm("trans-pure-bearing-wsj84", pair?.second)
                                                             return@afterHookedMethod
                                                         }
-                                                        if (abs(speedFromGcj02Mps - latestPureLocation.second.speed) <= speedTolerance
-                                                            && abs(bearingFromGcj02 - latestPureLocation.second.bearing) <= bearingTolerance) {
+
+                                                        val bearingFromGcj02Delta = abs(bearingFromGcj02 - latestPureLocation.second.bearing)
+                                                        logcatInfo { "\tgcj02Delta: speedDelta=$speedFromGcj02Delta, bearingDelta=$bearingFromGcj02Delta" }
+
+                                                        if (speedFromGcj02Delta <= speedTolerance && bearingFromGcj02Delta <= bearingTolerance) {
                                                             onRely("rely-pure-bearing-gcj02", currLatLng)
                                                             return@afterHookedMethod
                                                         }
                                                     }
 
                                                     // Compare speed
-                                                    if (abs(speedFromWgs84Mps - latestPureLocation.first.speed) <= speedTolerance || abs(speedFromGcj02Mps - latestPureLocation.second.speed) <= speedTolerance) {
-                                                        if (abs(speedFromWgs84Mps - latestPureLocation.first.speed) < abs(speedFromGcj02Mps - latestPureLocation.second.speed)) {
+                                                    logcatInfo { "\tspeedFromPureDelta: wgs84=$speedFromWgs84Delta, gcj02=$speedFromGcj02Delta" }
+                                                    if (speedFromWgs84Delta <= speedTolerance || speedFromGcj02Delta <= speedTolerance) {
+                                                        if (speedFromWgs84Delta < speedFromGcj02Delta) {
                                                             val pair = location.wgs84ToGcj02()?.also { (_, gcj02LatLng) ->
                                                                 when (method.name) {
                                                                     "getLatitude" -> hookParam.result = gcj02LatLng.latitude
@@ -318,27 +326,32 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                     // Compare speed & bearing
                                                     run {
                                                         val speedFromGcj02Mps = currLatLng.speedMpsFrom(lastLatLng)
-                                                        logcatInfo { "\tspeedToLast: gcj02=$speedFromGcj02Mps" }
+                                                        logcatInfo { "\tspeedFromLast: gcj02=$speedFromGcj02Mps" }
 
                                                         if (speedFromGcj02Mps == null) {
                                                             return@run
                                                         }
 
                                                         val speedTolerance = LOCATION_MOVE_SPEED_TOLERANCE // tolerance(meterPerSec)
-                                                        val bearingTolerance = LOCATION_MOVE_DIRECTION_TOLERANCE // degree(0~360)
+                                                        val speedFromGcj02Delta = abs(speedFromGcj02Mps - lastLatLng.speed)
 
                                                         if (lastLatLng.hasSpeedAndBearing) {
                                                             val bearingFromGcj02 = Location("bearing").also { it.safeSetLatLng(lastLatLng) }.bearingTo(location)
                                                             logcatInfo { "\tbearingFromLast: gcj02=$bearingFromGcj02" }
 
-                                                            if (abs(speedFromGcj02Mps - lastLatLng.speed) <= speedTolerance && abs(bearingFromGcj02 - lastLatLng.bearing) <= bearingTolerance) {
+                                                            val bearingTolerance = LOCATION_MOVE_DIRECTION_TOLERANCE // degree(0~360)
+                                                            val bearingFromGcj02Delta = abs(bearingFromGcj02 - lastLatLng.bearing)
+                                                            logcatInfo { "\tgcj02Delta: speedDelta=$speedFromGcj02Delta, bearingDelta=$bearingFromGcj02Delta" }
+
+                                                            if (speedFromGcj02Delta <= speedTolerance && bearingFromGcj02Delta <= bearingTolerance) {
                                                                 onRely("rely-last-bearing", currLatLng)
                                                                 return@afterHookedMethod
                                                             }
                                                         }
 
                                                         // Compare speed
-                                                        if (abs(speedFromGcj02Mps - lastLatLng.speed) <= speedTolerance) {
+                                                        logcatInfo { "\tspeedFromLastDelta: gcj02=$speedFromGcj02Delta" }
+                                                        if (speedFromGcj02Delta <= speedTolerance) {
                                                             onRely("rely-last-speed", currLatLng)
                                                             return@afterHookedMethod
                                                         }
