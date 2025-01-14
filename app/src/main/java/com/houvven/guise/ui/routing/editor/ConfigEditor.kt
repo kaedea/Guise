@@ -189,6 +189,7 @@ private fun ConfigEditorItems(state: ModuleConfigState, launch: () -> Unit) {
     ContainerSwitch(state.makeWifiLocationFail, stringResource(R.string.location_wifi_fail))
     ContainerSwitch(state.makeCellLocationFail, stringResource(R.string.location_mobile_fail))
     ContainerSwitch(state.makePassiveLocationFail, stringResource(R.string.location_passive_fail))
+    ContainerSwitch(state.makeFusedLocationFail, stringResource(R.string.location_fused_fail))
 
     Title(text = stringResource(R.string.title_build_config))
     InputBox(state.versionCode, stringResource(R.string.build_config_version_code))

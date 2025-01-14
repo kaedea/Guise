@@ -39,6 +39,7 @@ class ModuleConfigState private constructor(moduleConfig: ModuleConfig) {
     lateinit var makeWifiLocationFail: MutableState<Boolean>
     lateinit var makeCellLocationFail: MutableState<Boolean>
     lateinit var makePassiveLocationFail: MutableState<Boolean>
+    lateinit var makeFusedLocationFail: MutableState<Boolean>
 
     lateinit var versionCode: MutableState<String>
     lateinit var versionName: MutableState<String>

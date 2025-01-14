@@ -48,7 +48,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
     private val listenerHolder: MutableMap<Int, LocationListener> by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { hashMapOf() }
 
     override fun start() {
-        logcatInfo { "start" }
+        logcatInfo { "#start" }
 
         // Location APIs
         hookLocation()
@@ -66,7 +66,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         // hookGpsStatus()
         // hookGpsStatusListener()
 
-        logcatInfo { "start done" }
+        logcatInfo { "#start done" }
     }
 
     private fun hookLocation() {
@@ -743,6 +743,11 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
             }
             if (config.makePassiveLocationFail) {
                 providers.add(LocationManager.PASSIVE_PROVIDER)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (config.makeFusedLocationFail) {
+                    providers.add(LocationManager.FUSED_PROVIDER)
+                }
             }
             return@run if (providers.isEmpty()) emptyList<String>() else providers.toList()
         }

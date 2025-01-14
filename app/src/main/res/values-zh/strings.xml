@@ -43,6 +43,7 @@
     <string name="location_wifi_fail">使 WiFi 位置信息失效</string>
     <string name="location_mobile_fail">使 Mobile 位置信息失效</string>
     <string name="location_passive_fail">使 Passive 位置信息(被动定位)失效</string>
+    <string name="location_fused_fail">使 Fused 位置信息(混合定位)失效</string>
     <string name="other_battery_level">电量</string>
     <string name="other_language">语言</string>
     <string name="other_screenshot">截屏(0:强制禁止 1:强制启用)</string>

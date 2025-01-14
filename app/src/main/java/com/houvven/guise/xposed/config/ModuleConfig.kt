@@ -38,6 +38,7 @@ data class ModuleConfig(
     var makeWifiLocationFail: Boolean = false,
     var makeCellLocationFail: Boolean = false,
     var makePassiveLocationFail: Boolean = false,
+    var makeFusedLocationFail: Boolean = false,
 
     var versionCode: Int = -1,
     var versionName: String = "",
