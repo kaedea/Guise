@@ -20,11 +20,13 @@ import kotlin.math.abs
 
 class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBase(config) {
     companion object {
-        private const val LOCATION_EXPIRED_TIME_MS = 10 * 60 * 1000L // 10min
+        private const val LOCATION_EXPIRED_TIME_MS = 10 * 60 * 1000L           // 10min
         private const val LOCATION_LAST_GCJ02_EXPIRED_TIME_MS = 1 * 60 * 1000L // 1min
-        private const val LOCATION_MOVE_DISTANCE_TOLERANCE = 20 // 20m
-        private const val LOCATION_MOVE_SPEED_TOLERANCE = 60 // 60mps
+
         private const val DEFAULT_PASSIVE_LOCATION_AS_WGS84 = true
+        private const val LOCATION_MOVE_DIRECTION_TOLERANCE = 10 // 10°(0~360)
+        private const val LOCATION_MOVE_SPEED_TOLERANCE = 60     // 60mps
+        private const val LOCATION_MOVE_DISTANCE_TOLERANCE = 20  // 20m
     }
 
     private val initMs = System.currentTimeMillis()
@@ -119,8 +121,8 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         logcat {
                                             info("onRely")
                                             info("\tmode: $mode")
-                                            info("\tlast-gcj02: [${lastLatLng?.latitude}, ${lastLatLng?.longitude}]")
-                                            info("\tlatest-pure: [${latestPureLocation?.first?.latitude}, ${latestPureLocation?.first?.longitude}]")
+                                            info("\tlast-gcj02: $lastLatLng")
+                                            info("\tlatest-pure: ${latestPureLocation?.first}, ${latestPureLocation?.second}")
                                             info("<<<<<<<<<<<<<<<<<<")
                                         }
                                     }
@@ -132,8 +134,8 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         logcat {
                                             info("onTransForm")
                                             info("\tmode: $mode")
-                                            info("\tlast-gcj02: [${lastLatLng?.latitude}, ${lastLatLng?.longitude}]")
-                                            info("\tlatest-pure: [${latestPureLocation?.first?.latitude}, ${latestPureLocation?.first?.longitude}]")
+                                            info("\tlast-gcj02: $lastLatLng")
+                                            info("\tlatest-pure: ${latestPureLocation?.first}, ${latestPureLocation?.second}")
                                             info("\t${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
                                             info("<<<<<<<<<<<<<<<<<<")
                                         }
@@ -146,8 +148,8 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         logcat {
                                             info("onDrop")
                                             info("\tmode: $mode")
-                                            info("\tlast-gcj02: [${lastLatLng?.latitude}, ${lastLatLng?.longitude}]")
-                                            info("\tlatest-pure: [${latestPureLocation?.first?.latitude}, ${latestPureLocation?.first?.longitude}]")
+                                            info("\tlast-gcj02: $lastLatLng")
+                                            info("\tlatest-pure: ${latestPureLocation?.first}, ${latestPureLocation?.second}")
                                             info("\t${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
                                             info("<<<<<<<<<<<<<<<<<<")
                                         }
@@ -200,7 +202,62 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                             val latestPureLocation = getLatestPureLatLng()
                                             if (currLatLng == null || latestPureLocation == null) {
                                                 logcatWarn { "\tdistanceToPure: currLatLng=$currLatLng, latestPureLocation=$latestPureLocation" }
+
                                             } else {
+                                                // Compare speed & bearing
+                                                run {
+                                                    val speedFromWgs84Mps = currLatLng.speedMpsFrom(latestPureLocation.first)
+                                                    val speedFromGcj02Mps = currLatLng.speedMpsFrom(latestPureLocation.second)
+                                                    logcatInfo { "\tspeedToPure: wgs84=$speedFromWgs84Mps, gcj02=$speedFromGcj02Mps" }
+
+                                                    if (speedFromWgs84Mps == null || speedFromGcj02Mps == null) {
+                                                        return@run
+                                                    }
+
+                                                    val speedTolerance = LOCATION_MOVE_SPEED_TOLERANCE // tolerance(meterPerSec)
+                                                    val bearingTolerance = LOCATION_MOVE_DIRECTION_TOLERANCE // degree(0~360)
+
+                                                    if (latestPureLocation.first.hasSpeedAndBearing && latestPureLocation.second.hasSpeedAndBearing) {
+                                                        val bearingFromWgs84 = Location("bearing").also { it.safeSetLatLng(latestPureLocation.first) }.bearingTo(location)
+                                                        val bearingFromGcj02 = Location("bearing").also { it.safeSetLatLng(latestPureLocation.second) }.bearingTo(location)
+                                                        logcatInfo { "\tbearingFromPure: wgs84=$bearingFromWgs84, gcj02=$bearingFromGcj02" }
+
+                                                        if (abs(speedFromWgs84Mps - latestPureLocation.first.speed) <= speedTolerance
+                                                            && abs(bearingFromWgs84 - latestPureLocation.first.bearing) <= bearingTolerance) {
+                                                            val pair = location.wgs84ToGcj02()?.also { (_, gcj02LatLng) ->
+                                                                when (method.name) {
+                                                                    "getLatitude" -> hookParam.result = gcj02LatLng.latitude
+                                                                    "getLongitude" -> hookParam.result = gcj02LatLng.longitude
+                                                                }
+                                                            }
+                                                            onTransForm("trans-pure-bearing-wsj84", pair?.second)
+                                                            return@afterHookedMethod
+                                                        }
+                                                        if (abs(speedFromGcj02Mps - latestPureLocation.second.speed) <= speedTolerance
+                                                            && abs(bearingFromGcj02 - latestPureLocation.second.bearing) <= bearingTolerance) {
+                                                            onRely("rely-pure-bearing-gcj02", currLatLng)
+                                                            return@afterHookedMethod
+                                                        }
+                                                    }
+
+                                                    // Compare speed
+                                                    if (abs(speedFromWgs84Mps - latestPureLocation.first.speed) <= speedTolerance || abs(speedFromGcj02Mps - latestPureLocation.second.speed) <= speedTolerance) {
+                                                        if (abs(speedFromWgs84Mps - latestPureLocation.first.speed) < abs(speedFromGcj02Mps - latestPureLocation.second.speed)) {
+                                                            val pair = location.wgs84ToGcj02()?.also { (_, gcj02LatLng) ->
+                                                                when (method.name) {
+                                                                    "getLatitude" -> hookParam.result = gcj02LatLng.latitude
+                                                                    "getLongitude" -> hookParam.result = gcj02LatLng.longitude
+                                                                }
+                                                            }
+                                                            onTransForm("trans-pure-speed-wsj84", pair?.second)
+                                                        } else {
+                                                            onRely("rely-pure-speed-gcj02", currLatLng)
+                                                        }
+                                                        return@afterHookedMethod
+                                                    }
+                                                }
+
+                                                // Compare distance
                                                 run {
                                                     val tolerance = LOCATION_MOVE_DISTANCE_TOLERANCE // tolerance(meter)
                                                     val distanceToWgs84 = currLatLng.toDistance(latestPureLocation.first)
@@ -221,29 +278,11 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                         return@afterHookedMethod
                                                     }
                                                 }
-                                                run {
-                                                    val tolerance = LOCATION_MOVE_SPEED_TOLERANCE // tolerance(meterPerSec)
-                                                    val speedFromWgs84Mps = currLatLng.speedMps(latestPureLocation.first)
-                                                    val speedFromGcj02Mps = currLatLng.speedMps(latestPureLocation.second)
-                                                    logcatInfo { "\tspeedToPure: wgs84=$speedFromWgs84Mps, gcj02=$speedFromGcj02Mps" }
-                                                    if (abs(speedFromWgs84Mps) <= tolerance || abs(speedFromGcj02Mps) <= tolerance) {
-                                                        if (abs(speedFromWgs84Mps) < abs(speedFromGcj02Mps)) {
-                                                            val pair = location.wgs84ToGcj02()?.also { (_, gcj02LatLng) ->
-                                                                when (method.name) {
-                                                                    "getLatitude" -> hookParam.result = gcj02LatLng.latitude
-                                                                    "getLongitude" -> hookParam.result = gcj02LatLng.longitude
-                                                                }
-                                                            }
-                                                            onTransForm("trans-pure-speed-wsj84", pair?.second)
-                                                        } else {
-                                                            onRely("rely-pure-speed-gcj02", currLatLng)
-                                                        }
-                                                        return@afterHookedMethod
-                                                    }
-                                                }
+
+                                                // Check if twice-transformed
                                                 run {
                                                     logcat {
-                                                        currLatLng?.let {
+                                                        currLatLng.let {
                                                             CoordTransform.wgs84ToGcj02(latestPureLocation.second)?.let { gcj02TwiceLatLng ->
                                                                 val distanceToGcj02Twice = it.toDistance(gcj02TwiceLatLng)
                                                                 info("\tdistanceToPure: gcj02Twice=$distanceToGcj02Twice")
@@ -266,8 +305,48 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
 
                                         // 6. Compare to last gjc-02
                                         run {
-                                            run {
-                                                if (lastLatLng != null) {
+                                            if (lastLatLng != null) {
+                                                currLatLng?.let { currLatLng ->
+                                                    // Compare speed & bearing
+                                                    run {
+                                                        val speedFromGcj02Mps = currLatLng.speedMpsFrom(lastLatLng)
+                                                        logcatInfo { "\tspeedToLast: gcj02=$speedFromGcj02Mps" }
+
+                                                        if (speedFromGcj02Mps == null) {
+                                                            return@run
+                                                        }
+
+                                                        val speedTolerance = LOCATION_MOVE_SPEED_TOLERANCE // tolerance(meterPerSec)
+                                                        val bearingTolerance = LOCATION_MOVE_DIRECTION_TOLERANCE // degree(0~360)
+
+                                                        if (lastLatLng.hasSpeedAndBearing) {
+                                                            val bearingFromGcj02 = Location("bearing").also { it.safeSetLatLng(lastLatLng) }.bearingTo(location)
+                                                            logcatInfo { "\tbearingFromLast: gcj02=$bearingFromGcj02" }
+
+                                                            if (abs(speedFromGcj02Mps - lastLatLng.speed) <= speedTolerance && abs(bearingFromGcj02 - lastLatLng.bearing) <= bearingTolerance) {
+                                                                onRely("rely-last-bearing", currLatLng)
+                                                                return@afterHookedMethod
+                                                            }
+                                                        }
+
+                                                        // Compare speed
+                                                        if (abs(speedFromGcj02Mps - lastLatLng.speed) <= speedTolerance) {
+                                                            onRely("rely-last-speed", currLatLng)
+                                                            return@afterHookedMethod
+                                                        }
+                                                    }
+
+                                                    // Compare distance
+                                                    val distanceToGcj02 = currLatLng.toDistance(lastLatLng)
+                                                    logcatInfo { "\tdistanceToLast: gcj02=$distanceToGcj02" }
+                                                    if (abs(distanceToGcj02) <= LOCATION_MOVE_DISTANCE_TOLERANCE) {
+                                                        onRely("rely-last-distance", currLatLng)
+                                                        return@afterHookedMethod
+                                                    }
+                                                }
+
+                                                // Check if twice-transformed
+                                                run {
                                                     val tolerance = LOCATION_MOVE_DISTANCE_TOLERANCE // tolerance(meter)
                                                     val reversedLatLng = location.tryReverseTransform(lastLatLng, tolerance)
                                                     reversedLatLng?.let {
@@ -278,24 +357,6 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                         }
                                                         onTransForm("trans-last-reverse", it)
                                                         return@afterHookedMethod
-                                                    }
-                                                }
-                                            }
-                                            run {
-                                                if (lastLatLng != null) {
-                                                    currLatLng?.let { currLatLng ->
-                                                        val distanceToGcj02 = currLatLng.toDistance(lastLatLng)
-                                                        logcatInfo { "\tdistanceToLast: gcj02=$distanceToGcj02" }
-                                                        if (abs(distanceToGcj02) <= LOCATION_MOVE_DISTANCE_TOLERANCE) {
-                                                            onRely("rely-last-distance", currLatLng)
-                                                            return@afterHookedMethod
-                                                        }
-                                                        val speedFromGcj02Mps = currLatLng.speedMps(lastLatLng)
-                                                        logcatInfo { "\tspeedToLast: gcj02=$speedFromGcj02Mps" }
-                                                        if (abs(speedFromGcj02Mps) <= LOCATION_MOVE_SPEED_TOLERANCE) {
-                                                            onRely("rely-last-speed", currLatLng)
-                                                            return@afterHookedMethod
-                                                        }
                                                     }
                                                 }
                                             }
@@ -866,19 +927,19 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
     private fun noteLatLngMoving(curr: CoordTransform.LatLng, source: String) {
         val last = lastGcj02LatLng
         logcat {
-            error("noteLatLngMoving: [${last?.latitude},${last?.longitude}]>>[${curr.latitude},${curr.longitude}], from=${source}")
+            error("noteLatLngMoving: ${last?.toSimpleString()}>>${curr.toSimpleString()}, from=${source}")
             last?.let {
                 val distance = last.toDistance(curr)
-                val speedMps = curr.speedMps(last)
+                val speedMps = curr.speedMpsFrom(last)
                 error("noteLatLngMoving: distance=$distance, speedMps=${speedMps}")
                 if (distance > 100) {
                     val latTips = if (curr.latitude > last.latitude) "↑" else if (curr.latitude < last.latitude) "↓" else ""
                     val lngTips = if (curr.longitude > last.longitude) "→" else if (curr.longitude < last.longitude) "←" else ""
-                    val tips = if (curr.longitude > last.longitude) "=$latTips$lngTips" else "=$lngTips$latTips"
+                    val tips = if (curr.longitude > last.longitude) "$latTips$lngTips" else "$lngTips$latTips"
                     error("noteLatLngMoving: DRIFTING!! $tips")
                     if (distance > 200) {
                         if (System.currentTimeMillis() - initMs >= if (debuggable()) 30 * 1000L else 600 * 1000L) {
-                            toast { "DRIFTING!! ${distance}m ${speedMps}mPs $tips" }
+                            toast { "DRIFTING!! ${distance}m ${speedMps}mPs $tips\n${source}" }
                         }
                     }
                 }
@@ -890,7 +951,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         noteLatLngMoving(curr, source)
         logcat {
             val last = lastGcj02LatLng
-            error("updateLastGcj02LatLng: [${last?.latitude},${last?.longitude}]>>[${curr.latitude},${curr.longitude}], from=${source}")
+            error("updateLastGcj02LatLng: ${last?.toSimpleString()}>>${curr.toSimpleString()}, from=${source}")
         }
         lastGcj02LatLng = curr
         return lastGcj02LatLng!!

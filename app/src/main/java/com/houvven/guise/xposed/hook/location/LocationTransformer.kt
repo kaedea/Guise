@@ -463,6 +463,7 @@ internal object CoordTransform {
         var timeMs = 0L
         var elapsedRealtimeNanos = 0L
 
+        var hasSpeedAndBearing = false
         var speed = 0F
         var bearing = 0F
 
@@ -480,6 +481,7 @@ internal object CoordTransform {
         }
 
         fun setSpeedAndBearing(speed: Float, bearing: Float) {
+            this.hasSpeedAndBearing = true
             this.speed = speed
             this.bearing = bearing
         }
@@ -492,8 +494,11 @@ internal object CoordTransform {
         }
 
         override fun toString(): String {
-            return "LatLng(latitude=$latitude, longitude=$longitude, time=$timeMs, elapsedRealtimeNanos=$elapsedRealtimeNanos)"
+            val timeAgoSec = if (hasTimes) "${TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis() - timeMs)}s" else "null"
+            return "LatLng(latitude=$latitude, longitude=$longitude, timeAgoSec=$timeAgoSec, speed=$speed, bearing=$bearing)"
         }
+
+        fun toSimpleString() = "[$latitude,$longitude]"
 
         fun toDistance(end: LatLng): Float {
             val floats = floatArrayOf(-1f)
@@ -501,15 +506,18 @@ internal object CoordTransform {
             return floats[0].coerceAtLeast(0F)
         }
 
-        fun speedMps(last: LatLng): Float {
-            if (!this.hasTimes || !last.hasTimes) {
-                return -1F
+        /**
+         * Should check if returning null
+         */
+        fun speedMpsFrom(start: LatLng): Float? {
+            if (!this.hasTimes || !start.hasTimes) {
+                return null
             }
-            val sec = TimeUnit.MILLISECONDS.toSeconds(abs(this.timeMs - last.timeMs))
+            val sec = TimeUnit.MILLISECONDS.toSeconds(abs(this.timeMs - start.timeMs))
             if (sec <= 0) {
-                return -2F
+                return null
             }
-            val distance = toDistance(last)
+            val distance = toDistance(start)
             return distance / sec
         }
     }
