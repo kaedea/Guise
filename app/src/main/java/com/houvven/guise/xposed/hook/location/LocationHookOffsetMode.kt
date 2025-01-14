@@ -42,10 +42,10 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
 
     // Pure Location(wgs84, gcj02) for deferring fused location type
     private var latestPureLocation: Pair<CoordTransform.LatLng, CoordTransform.LatLng>? = null
-        set(value) {
-            logcatWarn { "latestPureLocation: [${field?.first?.latitude}, ${field?.first?.longitude}] >> [${value?.first?.latitude},${value?.first?.longitude}]" }
-            field = value
-        }
+        // set(value) {
+        //     logcatWarn { "latestPureLocation: [${field?.first?.latitude}, ${field?.first?.longitude}] >> [${value?.first?.latitude},${value?.first?.longitude}]" }
+        //     field = value
+        // }
 
     private val listenerHolder: MutableMap<Int, LocationListener> by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { hashMapOf() }
 
@@ -63,7 +63,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         hookProviderState()
 
         // GPS
-        removeNmeaListener()
+        // removeNmeaListener()
         // hookGnssStatus()
         // hookGpsStatus()
         // hookGpsStatusListener()
@@ -963,7 +963,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
 
     private fun updateLatestPureLatLng(wgs84: CoordTransform.LatLng, gcj02: CoordTransform.LatLng, source: String) {
         synchronized(locker) {
-            logcatInfo { "updateLatestPureLatLng, source=${source}" }
+            logcatWarn { "updateLatestPureLatLng: ${latestPureLocation?.first}>>$wgs84, from=${source}" }
             latestPureLocation = Pair(wgs84, gcj02)
         }
     }
