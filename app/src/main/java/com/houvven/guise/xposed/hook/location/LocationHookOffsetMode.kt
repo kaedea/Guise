@@ -48,6 +48,8 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
     private val listenerHolder: MutableMap<Int, LocationListener> by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { hashMapOf() }
 
     override fun start() {
+        logcatInfo { "start" }
+
         // Location APIs
         hookLocation()
         hookGetLastLocation()
@@ -63,6 +65,8 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         // hookGnssStatus()
         // hookGpsStatus()
         // hookGpsStatusListener()
+
+        logcatInfo { "start done" }
     }
 
     private fun hookLocation() {
@@ -364,30 +368,35 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
 
             // Hook constructors for debug
             if (debuggable()) {
-                XposedHelpers.findAndHookConstructor(
-                    this,
-                    this.javaClass.classLoader,
-                    String::class.java,
-                    object : XC_MethodHook() {
-                        override fun afterHookedMethod(hookParam: MethodHookParam) {
-                            logcat {
-                                info("onConstructorInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                try {
+                    logcatWarn { "Hook constructors" }
+                    XposedHelpers.findAndHookConstructor(
+                        this,
+                        String::class.java,
+                        object : XC_MethodHook() {
+                            override fun afterHookedMethod(hookParam: MethodHookParam) {
+                                logcat {
+                                    info("onConstructorInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                }
                             }
-                        }
-                    })
+                        })
 
-                XposedHelpers.findAndHookConstructor(
-                    this,
-                    this.javaClass.classLoader,
-                    Location::class.java,
-                    object : XC_MethodHook() {
-                        override fun afterHookedMethod(hookParam: MethodHookParam) {
-                            logcat {
-                                info("onConstructorInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                    XposedHelpers.findAndHookConstructor(
+                        this,
+                        Location::class.java,
+                        object : XC_MethodHook() {
+                            override fun afterHookedMethod(hookParam: MethodHookParam) {
+                                logcat {
+                                    info("onConstructorInvoke ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                }
                             }
                         }
-                    }
-                )
+                    )
+                } catch (e: Throwable) {
+                    exit { IllegalStateException("Hook constructors error", e) }
+                } finally {
+                    logcatWarn { "Hook constructors done" }
+                }
             }
         }
     }
