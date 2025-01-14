@@ -100,6 +100,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                             synchronized(locker) {
                                 (hookParam.thisObject as? Location)?.let { location ->
                                     val lastLatLng = lastGcj02LatLng
+                                    var latestPures: Pair<CoordTransform.LatLng, CoordTransform.LatLng>? = null
                                     val provider = location.safeGetProvider()
                                     val old = hookParam.result
 
@@ -126,7 +127,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                             info("onRely")
                                             info("\tmode: $mode")
                                             info("\tlast-gcj02: $lastLatLng")
-                                            info("\tlatest-pure: ${latestPureLocation?.first}, ${latestPureLocation?.second}")
+                                            info("\tlatest-pure: ${latestPures?.first}, ${latestPures?.second}")
                                             info("<<<<<<<<<<<<<<<<<<")
                                         }
                                     }
@@ -139,7 +140,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                             info("onTransForm")
                                             info("\tmode: $mode")
                                             info("\tlast-gcj02: $lastLatLng")
-                                            info("\tlatest-pure: ${latestPureLocation?.first}, ${latestPureLocation?.second}")
+                                            info("\tlatest-pure: ${latestPures?.first}, ${latestPures?.second}")
                                             info("\t${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
                                             info("<<<<<<<<<<<<<<<<<<")
                                         }
@@ -153,7 +154,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                             info("onDrop")
                                             info("\tmode: $mode")
                                             info("\tlast-gcj02: $lastLatLng")
-                                            info("\tlatest-pure: ${latestPureLocation?.first}, ${latestPureLocation?.second}")
+                                            info("\tlatest-pure: ${latestPures?.first}, ${latestPures?.second}")
                                             info("\t${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
                                             info("<<<<<<<<<<<<<<<<<<")
                                         }
@@ -207,7 +208,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
 
                                         // 5. Compare to latest pure location
                                         if (location.isReliableFused(lastLatLng)) {
-                                            val latestPureLocation = getLatestPureLatLng()
+                                            val latestPureLocation = getLatestPureLatLng().also { latestPures = it }
                                             if (currLatLng == null || latestPureLocation == null) {
                                                 logcatWarn { "\tcompareToPure: skip, currLatLng=$currLatLng, latestPureLocation=$latestPureLocation" }
 
