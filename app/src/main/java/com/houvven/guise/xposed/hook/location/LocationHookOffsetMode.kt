@@ -1022,8 +1022,12 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                 }
                 lastGcj02LatLng?.let { gcj02LatLng ->
                     CoordTransform.gcj02ToWgs84(gcj02LatLng)?.let { wgs84LatLng ->
-                        wgs84LatLng.setTimes(gcj02LatLng.timeMs, gcj02LatLng.elapsedRealtimeNanos)
-                        wgs84LatLng.setSpeedAndBearing(gcj02LatLng.speed, gcj02LatLng.bearing)
+                        if (gcj02LatLng.hasTimes) {
+                            wgs84LatLng.setTimes(gcj02LatLng.timeMs, gcj02LatLng.elapsedRealtimeNanos)
+                        }
+                        if (gcj02LatLng.hasSpeedAndBearing) {
+                            wgs84LatLng.setSpeedAndBearing(gcj02LatLng.speed, gcj02LatLng.bearing)
+                        }
                         logcatInfo { "\tlast-gcj02(cache)" }
                         return Pair(wgs84LatLng, gcj02LatLng)
                     }

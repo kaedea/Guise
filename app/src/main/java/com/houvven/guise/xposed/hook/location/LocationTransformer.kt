@@ -217,20 +217,22 @@ internal fun Location.wgs84ToGcj02(): Pair<CoordTransform.LatLng, CoordTransform
     }
     val oldLatLng = safeGetLatLng()
     val newLatLng = oldLatLng?.let {
-        return@let CoordTransform.wgs84ToGcj02(oldLatLng)?.also { outputLatLng ->
-            outputLatLng.setTimes(safeGetTime(), safeGetElapsedRealtimeNanos())
-            if (safeHasSpeed() && safeHasBearing()) {
-                outputLatLng.setSpeedAndBearing(safeGetSpeed(), safeGetBearing())
+        return@let CoordTransform.wgs84ToGcj02(oldLatLng)?.also { newLatLng ->
+            newLatLng.setTimes(safeGetTime(), safeGetElapsedRealtimeNanos())
+            val hasSpeed = safeHasSpeed()
+            val hasBearing = safeHasBearing()
+            if (hasSpeed && hasBearing) {
+                newLatLng.setSpeedAndBearing(safeGetSpeed(), safeGetBearing())
             }
-            safeSetLatLng(outputLatLng)
+            safeSetLatLng(newLatLng)
             safeSetExtras(let bundle@{
                 val bundle = if (it.extras != null) it.extras else Bundle()
                 bundle!!.run {
                     putBoolean("wgs2gcj", true)
                     putDouble("latWgs84" ,oldLatLng.latitude)
                     putDouble("lngWgs84" ,oldLatLng.longitude)
-                    putDouble("latGcj02" ,outputLatLng.latitude)
-                    putDouble("lngGcj02" ,outputLatLng.longitude)
+                    putDouble("latGcj02" ,newLatLng.latitude)
+                    putDouble("lngGcj02" ,newLatLng.longitude)
                 }
                 return@bundle bundle
             })
@@ -247,7 +249,20 @@ internal fun Location.wgs84ToGcj02(): Pair<CoordTransform.LatLng, CoordTransform
             safeSetProvider("${originProvider}@gcj02")
 
             if (UPDATE_ACCURACY) {
-                accuracy += oldLatLng.toDistance(outputLatLng)
+                accuracy += oldLatLng.toDistance(newLatLng)
+            }
+
+            if (hasSpeed) {
+                removeSpeed()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    removeSpeedAccuracy()
+                }
+            }
+            if (hasBearing) {
+                removeBearing()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    removeBearingAccuracy()
+                }
             }
 
             synchronized(mGcj02Holder) {
@@ -255,11 +270,11 @@ internal fun Location.wgs84ToGcj02(): Pair<CoordTransform.LatLng, CoordTransform
             }
         }
     }
-    logcatInfo { "\t[${oldLatLng?.latitude}, ${oldLatLng?.longitude}] >> [${newLatLng?.latitude}, ${newLatLng?.longitude}]" }
+    logcatInfo { "\t${oldLatLng?.toSimpleString()}>>${newLatLng?.toSimpleString()}" }
     if (oldLatLng != null && newLatLng != null) {
         logcatInfo { "\tdelta: ${oldLatLng.toDistance(newLatLng)}" }
-        CoordTransform.gcj02ToWgs84(newLatLng)?.let { revert ->
-            logcatInfo { "\t[${revert.latitude}, ${revert.longitude}] reverse delta: ${revert.toDistance(oldLatLng)}" }
+        CoordTransform.gcj02ToWgs84(newLatLng)?.let { reverse ->
+            logcatInfo { "\treverse<<${reverse.toSimpleString()}, delta: ${reverse.toDistance(oldLatLng)}" }
         }
     }
     logcatInfo { "cj02@${myHashcode()}: $this" }
