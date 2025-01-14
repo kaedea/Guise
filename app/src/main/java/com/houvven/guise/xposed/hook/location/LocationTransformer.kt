@@ -495,7 +495,9 @@ internal object CoordTransform {
 
         override fun toString(): String {
             val timeAgoSec = if (hasTimes) "${TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis() - timeMs)}s" else "null"
-            return "LatLng(latitude=$latitude, longitude=$longitude, timeAgoSec=$timeAgoSec, speed=$speed, bearing=$bearing)"
+            val speedTips = if (hasSpeedAndBearing) "${speed}mPs" else "null"
+            val bearingTips = if (hasSpeedAndBearing) "${bearing}degree" else "null"
+            return "LatLng([$latitude,$longitude], timeAgoSec=$timeAgoSec, speed=$speedTips, bearing=$bearingTips)"
         }
 
         fun toSimpleString() = "[$latitude,$longitude]"

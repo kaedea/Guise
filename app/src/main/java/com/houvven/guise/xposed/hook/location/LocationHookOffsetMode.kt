@@ -925,21 +925,23 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
     }
 
     private fun noteLatLngMoving(curr: CoordTransform.LatLng, source: String) {
-        val last = lastGcj02LatLng
-        logcat {
-            error("noteLatLngMoving: ${last?.toSimpleString()}>>${curr.toSimpleString()}, from=${source}")
-            last?.let {
-                val distance = last.toDistance(curr)
-                val speedMps = curr.speedMpsFrom(last)
-                error("noteLatLngMoving: distance=$distance, speedMps=${speedMps}")
-                if (distance > 100) {
-                    val latTips = if (curr.latitude > last.latitude) "↑" else if (curr.latitude < last.latitude) "↓" else ""
-                    val lngTips = if (curr.longitude > last.longitude) "→" else if (curr.longitude < last.longitude) "←" else ""
-                    val tips = if (curr.longitude > last.longitude) "$latTips$lngTips" else "$lngTips$latTips"
-                    error("noteLatLngMoving: DRIFTING!! $tips")
-                    if (distance > 200) {
-                        if (System.currentTimeMillis() - initMs >= if (debuggable()) 30 * 1000L else 600 * 1000L) {
-                            toast { "DRIFTING!! ${distance}m ${speedMps}mPs $tips\n${source}" }
+        synchronized(locker) {
+            val last = lastGcj02LatLng
+            logcat {
+                error("noteLatLngMoving: ${last?.toSimpleString()}>>${curr.toSimpleString()}, from=${source}")
+                last?.let {
+                    val distance = last.toDistance(curr)
+                    val speedMps = curr.speedMpsFrom(last)
+                    error("noteLatLngMoving: distance=$distance, speedMps=${speedMps}")
+                    if (distance > 100) {
+                        val latTips = if (curr.latitude > last.latitude) "↑" else if (curr.latitude < last.latitude) "↓" else ""
+                        val lngTips = if (curr.longitude > last.longitude) "→" else if (curr.longitude < last.longitude) "←" else ""
+                        val tips = if (curr.longitude > last.longitude) "$latTips$lngTips" else "$lngTips$latTips"
+                        error("noteLatLngMoving: DRIFTING!! $tips")
+                        if (distance > 200) {
+                            if (System.currentTimeMillis() - initMs >= if (debuggable()) 30 * 1000L else 600 * 1000L) {
+                                toast { "DRIFTING!! ${distance}m ${speedMps}mPs $tips\n${source}" }
+                            }
                         }
                     }
                 }
@@ -948,13 +950,15 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
     }
 
     private fun updateLastGcj02LatLng(curr: CoordTransform.LatLng, source: String): CoordTransform.LatLng {
-        noteLatLngMoving(curr, source)
-        logcat {
-            val last = lastGcj02LatLng
-            error("updateLastGcj02LatLng: ${last?.toSimpleString()}>>${curr.toSimpleString()}, from=${source}")
+        synchronized(locker) {
+            noteLatLngMoving(curr, source)
+            logcat {
+                val last = lastGcj02LatLng
+                error("updateLastGcj02LatLng: ${last?.toSimpleString()}>>${curr.toSimpleString()}, from=${source}")
+            }
+            lastGcj02LatLng = curr
+            return lastGcj02LatLng!!
         }
-        lastGcj02LatLng = curr
-        return lastGcj02LatLng!!
     }
 
     private fun updateLatestPureLatLng(wgs84: CoordTransform.LatLng, gcj02: CoordTransform.LatLng, source: String) {
