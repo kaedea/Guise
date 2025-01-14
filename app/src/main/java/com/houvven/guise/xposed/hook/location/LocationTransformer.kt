@@ -16,7 +16,7 @@ import kotlin.math.abs
  * @since  21/2/2023
  */
 
-private const val CHECK_PASSIVE_LOCATION_RELIABLE = true
+private const val CHECK_PASSIVE_LOCATION_RELIABLE = false
 private const val UPDATE_ACCURACY = false
 private const val BOUNDING_REFRESH_MS = 10 * 60 * 1000L // 10min
 
