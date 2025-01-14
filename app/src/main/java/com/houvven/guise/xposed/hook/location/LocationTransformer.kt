@@ -219,6 +219,9 @@ internal fun Location.wgs84ToGcj02(): Pair<CoordTransform.LatLng, CoordTransform
     val newLatLng = oldLatLng?.let {
         return@let CoordTransform.wgs84ToGcj02(oldLatLng)?.also { outputLatLng ->
             outputLatLng.setTimes(safeGetTime(), safeGetElapsedRealtimeNanos())
+            if (safeHasSpeed() && safeHasBearing()) {
+                outputLatLng.setSpeedAndBearing(safeGetSpeed(), safeGetBearing())
+            }
             safeSetLatLng(outputLatLng)
             safeSetExtras(let bundle@{
                 val bundle = if (it.extras != null) it.extras else Bundle()
@@ -455,9 +458,13 @@ internal object CoordTransform {
     class LatLng {
         var latitude = 0.0
         var longitude = 0.0
+
         var hasTimes = false
         var timeMs = 0L
         var elapsedRealtimeNanos = 0L
+
+        var speed = 0F
+        var bearing = 0F
 
         constructor(latitude: Double, longitude: Double) {
             this.latitude = latitude
@@ -470,6 +477,11 @@ internal object CoordTransform {
             this.hasTimes = true
             this.timeMs = time
             this.elapsedRealtimeNanos = elapsedRealtimeNanos
+        }
+
+        fun setSpeedAndBearing(speed: Float, bearing: Float) {
+            this.speed = speed
+            this.bearing = bearing
         }
 
         override fun equals(other: Any?): Boolean {

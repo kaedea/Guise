@@ -95,6 +95,10 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                             reentrantGuard.set(true)
                             synchronized(locker) {
                                 (hookParam.thisObject as? Location)?.let { location ->
+                                    val lastLatLng = lastGcj02LatLng
+                                    val provider = location.safeGetProvider()
+                                    val old = hookParam.result
+
                                     logcat {
                                         info(">>>>>>>>>>>>>>>>>>")
                                         info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${method.name}@${location.myHashcode()}")
@@ -102,14 +106,11 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         Throwable().stackTrace.forEach {
                                             info("\t\t$it")
                                         }
-                                        info("\ttime: ${simpleDateFormat.format(location.safeGetTime())}, expired=${location.isExpired(lastGcj02LatLng)}")
+                                        info("\ttime: ${simpleDateFormat.format(location.safeGetTime())}, expired=${location.isExpired(lastLatLng)}")
+                                        info("\tmotion: speed=${location.safeHasSpeed()}(${location.safeGetSpeed()}), bearing=${location.safeHasBearing()}(${location.safeGetBearing()})")
+                                        info("\tprovider: $provider")
                                         info("\t$location")
-                                        info("\tprovider: ${location.safeGetProvider()}")
                                     }
-
-                                    val provider = location.safeGetProvider()
-                                    val lastLatLng = lastGcj02LatLng
-                                    val old = hookParam.result
 
                                     val onRely = { mode: String, currGcj02: CoordTransform.LatLng? ->
                                         hasConsumed = true
@@ -898,6 +899,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                 lastGcj02LatLng?.let { gcj02LatLng ->
                     CoordTransform.gcj02ToWgs84(gcj02LatLng)?.let { wgs84LatLng ->
                         wgs84LatLng.setTimes(gcj02LatLng.timeMs, gcj02LatLng.elapsedRealtimeNanos)
+                        wgs84LatLng.setSpeedAndBearing(gcj02LatLng.speed, gcj02LatLng.bearing)
                         logcatInfo { "\tlast-gcj02(cache)" }
                         return Pair(wgs84LatLng, gcj02LatLng)
                     }

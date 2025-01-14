@@ -72,6 +72,46 @@ private val getElapsedRealtimeNanosMethod by lazy(LazyThreadSafetyMode.SYNCHRONI
     }
 }
 
+private val hasSpeedMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "hasSpeed").also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
+private val getSpeedMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "getSpeed").also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
+private val hasBearingMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "hasBearing").also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
+private val getBearingMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    try {
+        return@lazy XposedHelpers.findMethodExactIfExists(Location::class.java, "getBearing").also {
+            it.isAccessible = true
+        }
+    } catch (e: Exception) {
+        return@lazy null
+    }
+}
+
 
 private val setLatitudeMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     try {
@@ -189,7 +229,12 @@ internal fun Location.safeGetLatLng(): CoordTransform.LatLng? {
         }
         return@toLatLng null
     }
-    return toLatLng()?.also { it.setTimes(safeGetTime(), safeGetElapsedRealtimeNanos()) }
+    return toLatLng()?.also {
+        it.setTimes(safeGetTime(), safeGetElapsedRealtimeNanos())
+        if (safeHasSpeed() && safeHasBearing()) {
+            it.setSpeedAndBearing(safeGetSpeed(), safeGetBearing())
+        }
+    }
 }
 
 internal fun Location.safeGetProvider(): String? {
@@ -223,6 +268,39 @@ internal fun Location.safeGetElapsedRealtimeNanos(): Long {
         null
     ) as? Long ?: 0L
 }
+
+internal fun Location.safeHasSpeed(): Boolean {
+    return XposedBridge.invokeOriginalMethod(
+        hasSpeedMethod,
+        this,
+        null
+    ) as? Boolean ?: false
+}
+
+internal fun Location.safeGetSpeed(): Float {
+    return XposedBridge.invokeOriginalMethod(
+        getSpeedMethod,
+        this,
+        null
+    ) as? Float ?: 0F
+}
+
+internal fun Location.safeHasBearing(): Boolean {
+    return XposedBridge.invokeOriginalMethod(
+        hasBearingMethod,
+        this,
+        null
+    ) as? Boolean ?: false
+}
+
+internal fun Location.safeGetBearing(): Float {
+    return XposedBridge.invokeOriginalMethod(
+        getBearingMethod,
+        this,
+        null
+    ) as? Float ?: 0F
+}
+
 
 internal fun Location.safeSetLatLng(latLng: CoordTransform.LatLng) {
     val old = safeGetLatLng()
