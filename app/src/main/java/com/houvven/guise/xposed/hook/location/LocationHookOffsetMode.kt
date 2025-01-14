@@ -24,7 +24,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         private const val LOCATION_LAST_GCJ02_EXPIRED_TIME_MS = 1 * 60 * 1000L // 1min
 
         private const val PASSIVE_LOCATION_HOOK = true
-        private const val PASSIVE_LOCATION_ALWAYS_AS_GCJ02 = true
+        private const val PASSIVE_LOCATION_ALWAYS_AS_GCJ02 = false
         private const val PASSIVE_LOCATION_FALLBACK_AS_WGS84_OR_GCJ02 = true
         private const val LOCATION_MOVE_DIRECTION_TOLERANCE = 5  // 5°(0~360)
         private const val LOCATION_MOVE_SPEED_TOLERANCE = 10     // 10mps
