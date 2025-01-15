@@ -474,6 +474,25 @@ internal object CoordTransform {
     }
 
     class LatLng {
+        companion object {
+            fun normalizeTo360Bearing(bearing: Float): Float {
+                // Normalize bearings ([0, 360) or (-180, 180)) to the range [0, 360)
+                return (bearing + 360) % 360
+            }
+
+            fun is360BearingClose(bearingLeft: Float, bearingRight: Float, threshold: Float): Boolean {
+                // Check if the difference is within the threshold
+                return relative360BearingDelta(bearingLeft, bearingRight) <= threshold
+            }
+
+            fun relative360BearingDelta(bearingLeft: Float, bearingRight: Float): Float {
+                // Calculate the absolute difference
+                val diff = abs(bearingLeft - bearingRight)
+                // Take the smaller angle on the circle
+                return diff.coerceAtMost(360 - diff)
+            }
+        }
+
         var latitude = 0.0
         var longitude = 0.0
 
@@ -539,6 +558,12 @@ internal object CoordTransform {
             }
             val distance = toDistance(start)
             return distance / sec
+        }
+
+        fun bearingToIn360Degree(location: Location): Float {
+            return Location("bearing").also { it.safeSetLatLng(this) }.bearingTo(location).let { bearingToIn180Degree ->
+                return@let normalizeTo360Bearing(bearingToIn180Degree)
+            }
         }
     }
 }
