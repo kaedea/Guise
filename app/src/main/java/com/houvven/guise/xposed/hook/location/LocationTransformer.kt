@@ -6,6 +6,8 @@ import android.os.Build
 import android.os.Bundle
 import com.houvven.ktx_xposed.logger.exit
 import com.houvven.ktx_xposed.logger.logcatInfo
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.util.*
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -34,7 +36,7 @@ internal fun Location.checkIfBounded(): Boolean {
 
 private val mGcj02Holder by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     return@lazy object : LinkedHashSet<Int>() {
-        val limit = 100
+        val limit = 200
         override fun add(element: Int): Boolean {
             val add = super.add(element)
             if (add && size >= limit) {
@@ -50,7 +52,7 @@ private val mGcj02Holder by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
 
 internal fun Location.myHashcode(): Int {
     safeGetLatLng()?.let {
-        return Objects.hash(safeGetProvider(), it.longitude, it.latitude)
+        return it.latLngHashcode()
     }
     return hashCode()
 }
@@ -58,9 +60,14 @@ internal fun Location.myHashcode(): Int {
 internal fun Location.isFakeLocation() = extras != null && extras!!.getBoolean("isFake", false)
 
 internal fun Location.isGcj02Location(): Boolean {
-    synchronized (mGcj02Holder) {
-        if (mGcj02Holder.contains(myHashcode())) {
-            return true
+    safeGetLatLng()?.let {
+        synchronized (mGcj02Holder) {
+            val hashcode = it.latLngHashcode()
+            val hit = mGcj02Holder.contains(hashcode)
+            logcatInfo { "\tgetLatLngHashcode: ${it.toSimpleString()}@hash=$hashcode, hit=${hit}" }
+            if (hit) {
+                return true
+            }
         }
     }
     if (safeGetProvider()?.endsWith("@gcj02") == true) {
@@ -218,6 +225,11 @@ internal fun Location.wgs84ToGcj02(readOnly: Boolean = true): Pair<CoordTransfor
     val oldLatLng = safeGetLatLng()
     val newLatLng = oldLatLng?.let {
         return@let CoordTransform.wgs84ToGcj02(oldLatLng)?.also { newLatLng ->
+            synchronized(mGcj02Holder) {
+                val hashcode = newLatLng.latLngHashcode()
+                logcatInfo { "\tputLatLngHashcode: ${newLatLng.toSimpleString()}@hash=$hashcode" }
+                mGcj02Holder.add(hashcode)
+            }
             newLatLng.setTimes(safeGetTime(), safeGetElapsedRealtimeNanos())
             if (safeHasSpeed() && safeHasBearing()) {
                 newLatLng.setSpeedAndBearing(safeGetSpeed(), safeGetBearing())
@@ -282,10 +294,6 @@ internal fun Location.markAsGcj02(newLatLng: CoordTransform.LatLng) {
     //         removeBearingAccuracy()
     //     }
     // }
-
-    synchronized(mGcj02Holder) {
-        mGcj02Holder.add(myHashcode())
-    }
 }
 
 
@@ -475,6 +483,12 @@ internal object CoordTransform {
 
     class LatLng {
         companion object {
+            fun roundToDecimalPlaces(input: Double, place: Int = 7): Double {
+                return BigDecimal(input.toString()).setScale(place, RoundingMode.HALF_EVEN).toDouble()
+            }
+
+            fun latLngHashcode(latitude: Double, longitude: Double) = Objects.hash(latitude, longitude)
+
             fun normalizeTo360Bearing(bearing: Float): Float {
                 // Normalize bearings ([0, 360) or (-180, 180)) to the range [0, 360)
                 return (bearing + 360) % 360
@@ -494,7 +508,13 @@ internal object CoordTransform {
         }
 
         var latitude = 0.0
+            set(value) {
+                field = roundToDecimalPlaces(value, 7)
+            }
         var longitude = 0.0
+            set(value) {
+                field = roundToDecimalPlaces(value, 7)
+            }
 
         var hasTimes = false
         var timeMs = 0L
@@ -529,6 +549,8 @@ internal object CoordTransform {
             }
             return false
         }
+
+        fun latLngHashcode() = latLngHashcode(latitude, longitude)
 
         override fun toString(): String {
             val timeAgoSec = if (hasTimes) "${TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis() - timeMs)}s" else "null"
