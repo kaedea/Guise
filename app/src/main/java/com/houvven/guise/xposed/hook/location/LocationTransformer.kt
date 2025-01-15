@@ -219,19 +219,12 @@ internal fun Location.wgs84ToGcj02(readOnly: Boolean = true): Pair<CoordTransfor
     val newLatLng = oldLatLng?.let {
         return@let CoordTransform.wgs84ToGcj02(oldLatLng)?.also { newLatLng ->
             newLatLng.setTimes(safeGetTime(), safeGetElapsedRealtimeNanos())
-            val hasSpeed = safeHasSpeed()
-            val hasBearing = safeHasBearing()
-            if (hasSpeed && hasBearing) {
+            if (safeHasSpeed() && safeHasBearing()) {
                 newLatLng.setSpeedAndBearing(safeGetSpeed(), safeGetBearing())
             }
-            if (readOnly) {
-                return@also
-            }
-            safeSetLatLng(newLatLng)
             safeSetExtras(let bundle@{
-                val bundle = if (it.extras != null) it.extras else Bundle()
-                bundle!!.run {
-                    putBoolean("wgs2gcj", true)
+                val bundle = it.safeGetExtras() ?: Bundle()
+                bundle.run {
                     putDouble("latWgs84" ,oldLatLng.latitude)
                     putDouble("lngWgs84" ,oldLatLng.longitude)
                     putDouble("latGcj02" ,newLatLng.latitude)
@@ -240,36 +233,11 @@ internal fun Location.wgs84ToGcj02(readOnly: Boolean = true): Pair<CoordTransfor
                 return@bundle bundle
             })
 
-            // if (provider in listOf(LocationManager.GPS_PROVIDER)) {
-            //     accuracy = 10.0f
-            // }
-            // // provider = "${provider}@gcj02"
-            // time = System.currentTimeMillis()
-            // elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
-            // set(Location(this))
-
-            val originProvider = safeGetProvider()
-            safeSetProvider("${originProvider}@gcj02")
-
             if (UPDATE_ACCURACY) {
                 accuracy += oldLatLng.toDistance(newLatLng)
             }
-
-            if (hasSpeed) {
-                removeSpeed()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    removeSpeedAccuracy()
-                }
-            }
-            if (hasBearing) {
-                removeBearing()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    removeBearingAccuracy()
-                }
-            }
-
-            synchronized(mGcj02Holder) {
-                mGcj02Holder.add(myHashcode())
+            if (!readOnly) {
+                markAsGcj02(newLatLng)
             }
         }
     }
@@ -285,6 +253,38 @@ internal fun Location.wgs84ToGcj02(readOnly: Boolean = true): Pair<CoordTransfor
         null
     } else {
         Pair(oldLatLng, newLatLng)
+    }
+}
+
+internal fun Location.markAsGcj02(newLatLng: CoordTransform.LatLng) {
+    safeSetExtras(let bundle@{
+        val bundle = it.safeGetExtras() ?: Bundle()
+        bundle.run {
+            putBoolean("wgs2gcj", true)
+        }
+        return@bundle bundle
+    })
+
+    safeSetLatLng(newLatLng)
+
+    // refreshing all?
+    set(Location(this))
+
+    val originProvider = safeGetProvider()
+    safeSetProvider("${originProvider}@gcj02")
+
+    // Try remove speed & bearing after transformed to avoid fused chaos?
+    // if (newLatLng.hasSpeedAndBearing) {
+    //     removeSpeed()
+    //     removeBearing()
+    //     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+    //         removeSpeedAccuracy()
+    //         removeBearingAccuracy()
+    //     }
+    // }
+
+    synchronized(mGcj02Holder) {
+        mGcj02Holder.add(myHashcode())
     }
 }
 

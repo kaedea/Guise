@@ -315,7 +315,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                     val tolerance = LOCATION_MOVE_DISTANCE_TOLERANCE // tolerance(meter)
                                                     location.tryReverseTransform(latestPureLocation.second, tolerance)?.let {
                                                         if (!LOCATION_READ_ONLY) {
-                                                            location.safeSetLatLng(it)
+                                                            location.markAsGcj02(it)
                                                         }
                                                         when (method.name) {
                                                             "getLatitude" -> hookParam.result = it.latitude
@@ -381,7 +381,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                     val reversedLatLng = location.tryReverseTransform(lastLatLng, tolerance)
                                                     reversedLatLng?.let {
                                                         if (!LOCATION_READ_ONLY) {
-                                                            location.safeSetLatLng(it)
+                                                            location.markAsGcj02(it)
                                                         }
                                                         when (method.name) {
                                                             "getLatitude" -> hookParam.result = it.latitude
@@ -402,7 +402,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                 val mode = "drop-cache"
                                                 lastLatLng.let {
                                                     if (!LOCATION_READ_ONLY) {
-                                                        location.safeSetLatLng(it)
+                                                        location.markAsGcj02(it)
                                                     }
                                                     when (method.name) {
                                                         "getLatitude" -> hookParam.result = it.latitude
