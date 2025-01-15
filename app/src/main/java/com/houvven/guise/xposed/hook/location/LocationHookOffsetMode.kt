@@ -170,6 +170,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                     //    - provider & extras info
                                     //    - latest pure location: infer the most nearly one
                                     //    - last gcj-02 location: infer the most nearly one
+
                                     synchronized(location) {
                                         // 1. Out of bounds
                                         if (!location.shouldTransform()) {
@@ -308,7 +309,6 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                     }
                                                     val tolerance = LOCATION_MOVE_DISTANCE_TOLERANCE // tolerance(meter)
                                                     location.tryReverseTransform(latestPureLocation.second, tolerance)?.let {
-                                                        location.safeSetLatLng(it)
                                                         when (method.name) {
                                                             "getLatitude" -> hookParam.result = it.latitude
                                                             "getLongitude" -> hookParam.result = it.longitude
@@ -372,7 +372,6 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                     val tolerance = LOCATION_MOVE_DISTANCE_TOLERANCE // tolerance(meter)
                                                     val reversedLatLng = location.tryReverseTransform(lastLatLng, tolerance)
                                                     reversedLatLng?.let {
-                                                        location.safeSetLatLng(it)
                                                         when (method.name) {
                                                             "getLatitude" -> hookParam.result = it.latitude
                                                             "getLongitude" -> hookParam.result = it.longitude
@@ -391,7 +390,6 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                             if (lastLatLng != null && abs(currMs - lastLatLng.timeMs) <= LOCATION_LAST_GCJ02_CACHING_MS) {
                                                 val mode = "drop-cache"
                                                 lastLatLng.let {
-                                                    location.safeSetLatLng(it)
                                                     when (method.name) {
                                                         "getLatitude" -> hookParam.result = it.latitude
                                                         "getLongitude" -> hookParam.result = it.longitude
@@ -934,7 +932,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                     logcatInfo { "\tisTransformable: false" }
                     return@also
                 }
-                it.wgs84ToGcj02()?.let { (wgs84LatLng, gcj02LatLng) ->
+                it.wgs84ToGcj02(false)?.let { (wgs84LatLng, gcj02LatLng) ->
                     if (keepAsLastLatLng) {
                         updateLastGcj02LatLng(gcj02LatLng, source)
                     }

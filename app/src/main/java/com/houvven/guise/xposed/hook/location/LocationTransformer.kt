@@ -210,7 +210,7 @@ internal fun Location.getLocationGcj02(): CoordTransform.LatLng? {
     return CoordTransform.LatLng(extras!!.getDouble("latGcj02"), extras!!.getDouble("lngGcj02"))
 }
 
-internal fun Location.wgs84ToGcj02(): Pair<CoordTransform.LatLng, CoordTransform.LatLng>? { // <wgs84, gcj02>
+internal fun Location.wgs84ToGcj02(applyToSelf: Boolean = false): Pair<CoordTransform.LatLng, CoordTransform.LatLng>? { // <wgs84, gcj02>
     logcatInfo { "wgs84ToGcj02@${myHashcode()}: $this" }
     if (/*!isTransformable() || */isGcj02Location() || isFixUps()) {
         exit { throw IllegalStateException("isTransformable=${isTransformable()}, isGcj02=${isGcj02Location()}, isFixUps=${isFixUps()}") }
@@ -223,6 +223,9 @@ internal fun Location.wgs84ToGcj02(): Pair<CoordTransform.LatLng, CoordTransform
             val hasBearing = safeHasBearing()
             if (hasSpeed && hasBearing) {
                 newLatLng.setSpeedAndBearing(safeGetSpeed(), safeGetBearing())
+            }
+            if (!applyToSelf) {
+                return@also
             }
             safeSetLatLng(newLatLng)
             safeSetExtras(let bundle@{
