@@ -23,6 +23,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         private const val LOCATION_EXPIRED_TIME_MS = 10 * 60 * 1000L           // 10min
         private const val LOCATION_LAST_GCJ02_CACHING_MS = 5 * 60 * 1000L // 5min
 
+        private const val LOCATION_READ_ONLY = true
         private const val PASSIVE_LOCATION_HOOK = true
         private const val PASSIVE_LOCATION_ALWAYS_AS_GCJ02 = false
         private const val PASSIVE_LOCATION_FALLBACK_AS_WGS84_OR_GCJ02 = true
@@ -190,7 +191,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
 
                                         // 4. Check if transformable
                                         if (location.isTransformable(true)) {
-                                            val pair = location.wgs84ToGcj02()?.also { (_, gcj02LatLng) ->
+                                            val pair = location.wgs84ToGcj02(LOCATION_READ_ONLY)?.also { (_, gcj02LatLng) ->
                                                 when (method.name) {
                                                     "getLatitude" -> hookParam.result = gcj02LatLng.latitude
                                                     "getLongitude" -> hookParam.result = gcj02LatLng.longitude
@@ -238,7 +239,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                         logcatInfo { "\twgs84Delta: speedDelta=$speedFromWgs84Delta, bearingDelta=$bearingFromWgs84Delta" }
 
                                                         if (speedFromWgs84Delta <= speedTolerance && bearingFromWgs84Delta <= bearingTolerance) {
-                                                            val pair = location.wgs84ToGcj02()?.also { (_, gcj02LatLng) ->
+                                                            val pair = location.wgs84ToGcj02(LOCATION_READ_ONLY)?.also { (_, gcj02LatLng) ->
                                                                 when (method.name) {
                                                                     "getLatitude" -> hookParam.result = gcj02LatLng.latitude
                                                                     "getLongitude" -> hookParam.result = gcj02LatLng.longitude
@@ -261,7 +262,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                     logcatInfo { "\tspeedFromPureDelta: wgs84=$speedFromWgs84Delta, gcj02=$speedFromGcj02Delta" }
                                                     if (speedFromWgs84Delta <= speedTolerance || speedFromGcj02Delta <= speedTolerance) {
                                                         if (speedFromWgs84Delta < speedFromGcj02Delta) {
-                                                            val pair = location.wgs84ToGcj02()?.also { (_, gcj02LatLng) ->
+                                                            val pair = location.wgs84ToGcj02(LOCATION_READ_ONLY)?.also { (_, gcj02LatLng) ->
                                                                 when (method.name) {
                                                                     "getLatitude" -> hookParam.result = gcj02LatLng.latitude
                                                                     "getLongitude" -> hookParam.result = gcj02LatLng.longitude
@@ -283,7 +284,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                     logcatInfo { "\tdistanceToPure: wgs84=$distanceToWgs84, gcj02=$distanceToGcj02" }
                                                     if (abs(distanceToWgs84) <= tolerance || abs(distanceToGcj02) <= tolerance) {
                                                         if (abs(distanceToWgs84) < abs(distanceToGcj02)) {
-                                                            val pair = location.wgs84ToGcj02()?.also { (_, gcj02LatLng) ->
+                                                            val pair = location.wgs84ToGcj02(LOCATION_READ_ONLY)?.also { (_, gcj02LatLng) ->
                                                                 when (method.name) {
                                                                     "getLatitude" -> hookParam.result = gcj02LatLng.latitude
                                                                     "getLongitude" -> hookParam.result = gcj02LatLng.longitude
@@ -309,6 +310,9 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                     }
                                                     val tolerance = LOCATION_MOVE_DISTANCE_TOLERANCE // tolerance(meter)
                                                     location.tryReverseTransform(latestPureLocation.second, tolerance)?.let {
+                                                        if (!LOCATION_READ_ONLY) {
+                                                            location.safeSetLatLng(it)
+                                                        }
                                                         when (method.name) {
                                                             "getLatitude" -> hookParam.result = it.latitude
                                                             "getLongitude" -> hookParam.result = it.longitude
@@ -372,6 +376,9 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                     val tolerance = LOCATION_MOVE_DISTANCE_TOLERANCE // tolerance(meter)
                                                     val reversedLatLng = location.tryReverseTransform(lastLatLng, tolerance)
                                                     reversedLatLng?.let {
+                                                        if (!LOCATION_READ_ONLY) {
+                                                            location.safeSetLatLng(it)
+                                                        }
                                                         when (method.name) {
                                                             "getLatitude" -> hookParam.result = it.latitude
                                                             "getLongitude" -> hookParam.result = it.longitude
@@ -390,6 +397,9 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                             if (lastLatLng != null && abs(currMs - lastLatLng.timeMs) <= LOCATION_LAST_GCJ02_CACHING_MS) {
                                                 val mode = "drop-cache"
                                                 lastLatLng.let {
+                                                    if (!LOCATION_READ_ONLY) {
+                                                        location.safeSetLatLng(it)
+                                                    }
                                                     when (method.name) {
                                                         "getLatitude" -> hookParam.result = it.latitude
                                                         "getLongitude" -> hookParam.result = it.longitude
@@ -404,7 +414,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         val currMs = location.safeGetTime()
                                         logcatWarn { "\ttime ago: $currMs - ${lastGcj02LatLng?.timeMs} = ${TimeUnit.MILLISECONDS.toSeconds((currMs - (lastGcj02LatLng?.timeMs ?: 0)))}s" }
                                         if (PASSIVE_LOCATION_FALLBACK_AS_WGS84_OR_GCJ02) {
-                                            val pair = location.wgs84ToGcj02()?.also { (_, gcj02LatLng) ->
+                                            val pair = location.wgs84ToGcj02(LOCATION_READ_ONLY)?.also { (_, gcj02LatLng) ->
                                                 when (method.name) {
                                                     "getLatitude" -> hookParam.result = gcj02LatLng.latitude
                                                     "getLongitude" -> hookParam.result = gcj02LatLng.longitude
@@ -932,7 +942,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                     logcatInfo { "\tisTransformable: false" }
                     return@also
                 }
-                it.wgs84ToGcj02(false)?.let { (wgs84LatLng, gcj02LatLng) ->
+                it.wgs84ToGcj02(LOCATION_READ_ONLY)?.let { (wgs84LatLng, gcj02LatLng) ->
                     if (keepAsLastLatLng) {
                         updateLastGcj02LatLng(gcj02LatLng, source)
                     }
@@ -993,7 +1003,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
             } else {
                 // Try last provider-wgs84
                 getLastKnownWgs84Location(expiringMs)?.let { (provider, location) ->
-                    location.wgs84ToGcj02()?.let { (_, gcj02LatLng) ->
+                    location.wgs84ToGcj02(LOCATION_READ_ONLY)?.let { (_, gcj02LatLng) ->
                         updateLastGcj02LatLng(gcj02LatLng, "last-known-$provider")
                         logcatInfo { "\tlast-known-$provider" }
                         return gcj02LatLng
@@ -1031,7 +1041,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
             } else {
                 // Try last provider-wgs84
                 getLastKnownWgs84Location(expiringMs)?.let { (provider, location) ->
-                    location.wgs84ToGcj02()?.let { (wgs84LatLng, gcj02LatLng) ->
+                    location.wgs84ToGcj02(LOCATION_READ_ONLY)?.let { (wgs84LatLng, gcj02LatLng) ->
                         updateLatestPureLatLng(wgs84LatLng, gcj02LatLng, "last-known-$provider")
                         logcatInfo { "\tlast-known-$provider" }
                         return latestPureLocation!!
