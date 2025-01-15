@@ -101,7 +101,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                             reentrantGuard.set(true)
                             synchronized(locker) {
                                 (hookParam.thisObject as? Location)?.let { location ->
-                                    val lastLatLng = getLatGcj02LatLng()
+                                    var lastGcj02: CoordTransform.LatLng? = null
                                     var latestPures: Pair<CoordTransform.LatLng, CoordTransform.LatLng>? = null
                                     val provider = location.safeGetProvider()
                                     val old = hookParam.result
@@ -113,7 +113,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         Throwable().stackTrace.forEach {
                                             info("\t\t$it")
                                         }
-                                        info("\ttime: ${simpleDateFormat.format(location.safeGetTime())}, expired=${location.isExpired(lastLatLng)}")
+                                        info("\ttime: ${simpleDateFormat.format(location.safeGetTime())}, expired=${location.isExpired(lastGcj02)}")
                                         info("\tmotion: speed=${location.safeHasSpeed()}(${location.safeGetSpeed()}), bearing=${location.safeHasBearing()}(${location.safeGetBearing()})")
                                         info("\tprovider: $provider")
                                         info("\t$location")
@@ -128,7 +128,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         logcat {
                                             info("onRely")
                                             info("\tmode: $mode")
-                                            info("\tlast-gcj02: $lastLatLng")
+                                            info("\tlast-gcj02: $lastGcj02")
                                             info("\tlatest-pure: ${latestPures?.first}, ${latestPures?.second}")
                                             info("<<<<<<<<<<<<<<<<<<")
                                         }
@@ -141,7 +141,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         logcat {
                                             info("onTransForm")
                                             info("\tmode: $mode")
-                                            info("\tlast-gcj02: $lastLatLng")
+                                            info("\tlast-gcj02: $lastGcj02")
                                             info("\tlatest-pure: ${latestPures?.first}, ${latestPures?.second}")
                                             info("\t${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
                                             info("<<<<<<<<<<<<<<<<<<")
@@ -149,13 +149,13 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                     }
                                     val onDrop = { mode: String ->
                                         hasConsumed = true
-                                        lastLatLng?.let {
+                                        lastGcj02?.let {
                                             noteLatLngMoving(it, "hookLocation#${method.name}($provider)-$mode")
                                         }
                                         logcat {
                                             info("onDrop")
                                             info("\tmode: $mode")
-                                            info("\tlast-gcj02: $lastLatLng")
+                                            info("\tlast-gcj02: $lastGcj02")
                                             info("\tlatest-pure: ${latestPures?.first}, ${latestPures?.second}")
                                             info("\t${method.name} ${if (old == hookParam.result) "==" else ">>"}: $old to ${hookParam.result}")
                                             info("<<<<<<<<<<<<<<<<<<")
@@ -179,6 +179,9 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                             onRely("rely-out-of-bounded", null)
                                             return@afterHookedMethod
                                         }
+
+                                        val lastLatLng = getLatGcj02LatLng().also { lastGcj02 = it }
+
                                         // 2. Expired
                                         if (location.isExpired(lastLatLng)) {
                                             onRely("rely-expired", null)
