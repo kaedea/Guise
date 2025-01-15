@@ -99,7 +99,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                             reentrantGuard.set(true)
                             synchronized(locker) {
                                 (hookParam.thisObject as? Location)?.let { location ->
-                                    val lastLatLng = lastGcj02LatLng
+                                    val lastLatLng = getLatGcj02LatLng()
                                     var latestPures: Pair<CoordTransform.LatLng, CoordTransform.LatLng>? = null
                                     val provider = location.safeGetProvider()
                                     val old = hookParam.result
@@ -983,6 +983,37 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         }
     }
 
+    private fun getLatGcj02LatLng(): CoordTransform.LatLng? {
+        synchronized(locker) {
+            logcatInfo { "getLatGcj02LatLng:" }
+            val expiringMs = LOCATION_EXPIRED_TIME_MS
+            val latestTimeMs = if (lastGcj02LatLng == null) 0L else lastGcj02LatLng!!.timeMs
+            if (System.currentTimeMillis() >= latestTimeMs && (System.currentTimeMillis() - latestTimeMs) <= expiringMs) {
+                logcatInfo { "\tactive" }
+                return lastGcj02LatLng!!
+
+            } else {
+                // Try last provider-wgs84
+                getLastKnownWgs84Location(expiringMs)?.let { (provider, location) ->
+                    location.wgs84ToGcj02()?.let { (_, gcj02LatLng) ->
+                        updateLastGcj02LatLng(gcj02LatLng, "last-known-$provider")
+                        logcatInfo { "\tlast-known-$provider" }
+                        return gcj02LatLng
+                    }
+                }
+                // Try last provider-gcj02
+                getLastKnownGcj02Location(expiringMs)?.let { (provider, location) ->
+                    location.safeGetLatLng()?.let { gcj02LatLng ->
+                        updateLastGcj02LatLng(gcj02LatLng, "last-known-$provider")
+                        logcatInfo { "\tlast-known-$provider" }
+                        return gcj02LatLng
+                    }
+                }
+                return null
+            }
+        }
+    }
+
     private fun updateLatestPureLatLng(wgs84: CoordTransform.LatLng, gcj02: CoordTransform.LatLng, source: String) {
         synchronized(locker) {
             logcatWarn { "updateLatestPureLatLng: ${latestPureLocation?.first}>>$wgs84, from=${source}" }
@@ -994,50 +1025,86 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         synchronized(locker) {
             logcatInfo { "getLatestPureLatLng:" }
             val expiringMs = LOCATION_EXPIRED_TIME_MS
-            if (latestPureLocation == null
-                || !latestPureLocation!!.first.hasTimes
-                || (System.currentTimeMillis() - latestPureLocation!!.first.timeMs) > expiringMs
-            ) {
-                // Try update latest pure location
-                val currMs = System.currentTimeMillis()
-                // try last gps
-                safeGetLastKnownLocationInternal(LocationManager.GPS_PROVIDER)?.let {
-                    if (it.safeGetTime() <= currMs && (currMs - it.safeGetTime()) <= expiringMs) {
-                        it.wgs84ToGcj02()?.let { (wgs84LatLng, gcj02LatLng) ->
-                            updateLatestPureLatLng(wgs84LatLng, gcj02LatLng, "last-gps")
-                            logcatInfo { "\tlast-gps" }
-                            return latestPureLocation!!
-                        }
-                    }
-                }
-                // try last network (network location always be pure?)
-                safeGetLastKnownLocationInternal(LocationManager.NETWORK_PROVIDER)?.let {
-                    if (it.safeGetTime() <= currMs && (currMs - it.safeGetTime()) <= expiringMs) {
-                        it.wgs84ToGcj02()?.let { (wgs84LatLng, gcj02LatLng) ->
-                            updateLatestPureLatLng(wgs84LatLng, gcj02LatLng, "last-network")
-                            logcatInfo { "\tlast-network" }
-                            return latestPureLocation!!
-                        }
-                    }
-                }
-                lastGcj02LatLng?.let { gcj02LatLng ->
-                    CoordTransform.gcj02ToWgs84(gcj02LatLng)?.let { wgs84LatLng ->
-                        if (gcj02LatLng.hasTimes) {
-                            wgs84LatLng.setTimes(gcj02LatLng.timeMs, gcj02LatLng.elapsedRealtimeNanos)
-                        }
-                        if (gcj02LatLng.hasSpeedAndBearing) {
-                            wgs84LatLng.setSpeedAndBearing(gcj02LatLng.speed, gcj02LatLng.bearing)
-                        }
-                        logcatInfo { "\tlast-gcj02(cache)" }
-                        return Pair(wgs84LatLng, gcj02LatLng)
-                    }
-                }
-                return null
-            } else {
+            val latestTimeMs = if (latestPureLocation == null) 0L else latestPureLocation!!.first.timeMs
+            if (System.currentTimeMillis() >= latestTimeMs && (System.currentTimeMillis() - latestTimeMs) <= expiringMs) {
                 logcatInfo { "\tactive" }
+                return latestPureLocation!!
+
+            } else {
+                // Try last provider-wgs84
+                getLastKnownWgs84Location(expiringMs)?.let { (provider, location) ->
+                    location.wgs84ToGcj02()?.let { (wgs84LatLng, gcj02LatLng) ->
+                        updateLatestPureLatLng(wgs84LatLng, gcj02LatLng, "last-known-$provider")
+                        logcatInfo { "\tlast-known-$provider" }
+                        return latestPureLocation!!
+                    }
+                }
+
+                run pureGcj02LatLng@{
+                    // Try last provider-gcj02
+                    getLastKnownGcj02Location(expiringMs)?.let { (provider, location) ->
+                        location.safeGetLatLng()?.let { gcj02LatLng ->
+                            logcatInfo { "\tlast-known-$provider" }
+                            return@pureGcj02LatLng gcj02LatLng
+                        }
+                    }
+                    // try last updated gcj02
+                    return@pureGcj02LatLng lastGcj02LatLng?.also {
+                        logcatInfo { "\tlast-gcj02(cache)" }
+                    }
+                }?.let { pureGcj02LatLng ->
+                    CoordTransform.gcj02ToWgs84(pureGcj02LatLng)?.let { wgs84LatLng ->
+                        if (pureGcj02LatLng.hasTimes) {
+                            wgs84LatLng.setTimes(pureGcj02LatLng.timeMs, pureGcj02LatLng.elapsedRealtimeNanos)
+                        }
+                        if (pureGcj02LatLng.hasSpeedAndBearing) {
+                            wgs84LatLng.setSpeedAndBearing(pureGcj02LatLng.speed, pureGcj02LatLng.bearing)
+                        }
+                        return Pair(wgs84LatLng, pureGcj02LatLng)
+                    }
+                }
+
+                return null
             }
-            return latestPureLocation!!
         }
+    }
+
+    private fun getLastKnownWgs84Location(expiringMs: Long): Pair<String, Location>? {
+        val currMs = System.currentTimeMillis()
+        listOf(
+            LocationManager.GPS_PROVIDER,
+            LocationManager.NETWORK_PROVIDER, // network location always be pure?
+        ).forEach { provider ->
+            safeGetLastKnownLocationInternal(provider)?.let {
+                if (it.safeGetTime() <= currMs && (currMs - it.safeGetTime()) <= expiringMs) {
+                    return Pair(provider, it)
+                }
+            }
+        }
+        return  null
+    }
+
+    private fun getLastKnownGcj02Location(expiringMs: Long): Pair<String, Location>? {
+        val currMs = System.currentTimeMillis()
+        val getLastKnownGcj02Location: (String) -> Location? = getLastKnownGcj02@{ gcj02Provider ->
+            safeGetLastKnownLocationInternal(gcj02Provider)?.let {
+                if (it.safeGetTime() <= currMs && (currMs - it.safeGetTime()) <= expiringMs) {
+                    return@getLastKnownGcj02 it
+                }
+            }
+            return@getLastKnownGcj02 null
+        }
+        val providers = mutableListOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            providers.add(LocationManager.FUSED_PROVIDER)
+        }
+        providers.forEach { provider ->
+            val gcj02Provider = "${provider}@gcj02"
+            getLastKnownGcj02Location(gcj02Provider)?.let {
+                return Pair(gcj02Provider, it)
+            }
+        }
+        return  null
     }
 
     private fun safeGetLastKnownLocationInternal(provider: String): Location? {
