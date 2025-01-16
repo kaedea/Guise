@@ -21,6 +21,7 @@ import kotlin.math.abs
 private const val CHECK_PASSIVE_LOCATION_RELIABLE = false
 private const val UPDATE_ACCURACY = false
 private const val BOUNDING_REFRESH_MS = 10 * 60 * 1000L // 10min
+internal const val LOCATION_MOVE_DISTANCE_TOLERANCE = 20  // 20m
 
 private var mBoundingRef: Pair<Boolean, Long> = Pair(true, 0L)
 
@@ -88,16 +89,27 @@ internal fun Location.shouldTransform(): Boolean {
     return mBoundingRef.first
 }
 
-internal fun Location.isTransformable(fromPassive: Boolean = false): Boolean {
-    if (safeGetProvider() == LocationManager.GPS_PROVIDER) {
+internal fun Location.isTransformable(lastLatLng: CoordTransform.LatLng? = null): Boolean {
+    val provider = safeGetProvider()
+    if (provider == LocationManager.GPS_PROVIDER) {
         return true
     }
-    if (safeGetProvider() == LocationManager.NETWORK_PROVIDER) {
+    if (provider == LocationManager.NETWORK_PROVIDER) {
         // fromPassive=true means that this location is not retrieved by LocationListener.
         // Tt could be produced by LocationListener of other process.
         // In this case we consider this type of network location as not-transformable, which we should
         // check if reliable or not.
-        return !fromPassive
+        // return !fromPassive
+
+        // Check if near to last gcj-02
+        if (lastLatLng != null) {
+            safeGetLatLng()?.let {
+                if (it.isNearTo(lastLatLng)) {
+                    return false
+                }
+            }
+        }
+        return true
     }
     // if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && provider == LocationManager.FUSED_PROVIDER) {
     //     // Fused Location (both Location & GmmLocation) might has been transformed
@@ -126,8 +138,8 @@ internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null)
         //  - Suddenly drifting of about 629 meters (diff of wgs-84 & gcj-02 in the same real position)
         // Only god knows how do the following codes work!
         val extras = safeGetExtras()
-        if (extras?.containsKey("locationType") == true && extras!!.getInt("locationType", -1) != 3) {
-            logcatInfo { "\tno: locationType=${extras!!.containsKey("locationType")}" }
+        if (extras?.containsKey("locationType") == true && extras.getInt("locationType", -1) != 3) {
+            logcatInfo { "\tno: locationType=${extras.containsKey("locationType")}" }
         } else {
             if (!isFixUps()) {
                 reliable = true
@@ -136,18 +148,17 @@ internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null)
                     safeGetLatLng()?.let {
                         val delta = it.toDistance(lastLatLng)
                         logcatInfo { "\tmove: [${lastLatLng.latitude}, ${lastLatLng.longitude}] >> [${it.latitude},${it.longitude}] = $delta" }
-                        if (delta in 0.0..200.0) {
+                        if (abs(delta) <= 200.0) {
                             logcatInfo { "\tyes: moving" }
                         } else {
                             // Maybe just move too fast
                             safeGetLatLng()?.let {
                                 CoordTransform.wgs84ToGcj02(lastLatLng)?.let { twiceTransLatLng ->
-                                    val distance = twiceTransLatLng.toDistance(it)
-                                    if (distance in 0.0..10.0) {
-                                        logcatInfo { "\tno: drifting, twiceTransDistance=$distance" }
+                                    if (twiceTransLatLng.isNearTo(it)) {
+                                        logcatInfo { "\tno: drifting, twiceTransDistance=${twiceTransLatLng.toDistance(it)}" }
                                         reliable = false
                                     } else {
-                                        logcatInfo { "\tyes: moving fast, twiceTransDistance=$distance" }
+                                        logcatInfo { "\tyes: moving fast, twiceTransDistance=${twiceTransLatLng.toDistance(it)}" }
                                     }
                                 }
                             }
@@ -564,6 +575,8 @@ internal object CoordTransform {
         fun isExpired(thresholdMs: Long, currMs: Long = System.currentTimeMillis()) =
             // Better way to handle hasTimes=false ?
             !hasTimes || (timeMs < currMs && currMs - timeMs > thresholdMs)
+
+        fun isNearTo(another: LatLng) = abs(toDistance(another)) <= LOCATION_MOVE_DISTANCE_TOLERANCE
 
         fun toDistance(end: LatLng): Float {
             val floats = floatArrayOf(-1f)

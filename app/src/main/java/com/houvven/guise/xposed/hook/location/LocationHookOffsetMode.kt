@@ -33,7 +33,6 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         private const val PASSIVE_LOCATION_FALLBACK_AS_WGS84_OR_GCJ02 = true
         private const val LOCATION_MOVE_DIRECTION_TOLERANCE = 5  // 5°(0~360)
         private const val LOCATION_MOVE_SPEED_TOLERANCE = 10     // 10mps
-        private const val LOCATION_MOVE_DISTANCE_TOLERANCE = 20  // 20m
     }
 
     private val initMs = System.currentTimeMillis()
@@ -197,7 +196,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         }
 
                                         // 4. Check if transformable
-                                        if (location.isTransformable(true)) {
+                                        if (location.isTransformable(lastLatLng)) {
                                             val pair = location.wgs84ToGcj02(LOCATION_READ_ONLY)?.also { (_, gcj02LatLng) ->
                                                 when (method.name) {
                                                     "getLatitude" -> hookParam.result = gcj02LatLng.latitude
