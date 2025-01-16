@@ -4,6 +4,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import com.houvven.ktx_xposed.logger.exit
 import com.houvven.ktx_xposed.logger.logcatInfo
 import java.math.BigDecimal
@@ -572,9 +573,11 @@ internal object CoordTransform {
 
         fun toSimpleString() = "[$latitude,$longitude]"
 
-        fun isExpired(thresholdMs: Long, currMs: Long = System.currentTimeMillis()) =
+        fun isExpired(thresholdMs: Long, currMs: Long = System.currentTimeMillis(), currElapsedRealtimeNanos: Long = SystemClock.elapsedRealtimeNanos()) =
             // Better way to handle hasTimes=false ?
-            !hasTimes || (timeMs < currMs && currMs - timeMs > thresholdMs)
+            !hasTimes
+                    || (timeMs < currMs && currMs - timeMs > thresholdMs)
+                    || (elapsedRealtimeNanos < currElapsedRealtimeNanos && currElapsedRealtimeNanos - elapsedRealtimeNanos > thresholdMs)
 
         fun isNearTo(another: LatLng) = abs(toDistance(another)) <= LOCATION_MOVE_DISTANCE_TOLERANCE
 

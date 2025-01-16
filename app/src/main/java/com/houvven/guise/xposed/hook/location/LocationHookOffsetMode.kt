@@ -28,6 +28,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         private const val LOCATION_LAST_GCJ02_CACHING_MS = 1 * 60 * 1000L // 1min
 
         private const val LOCATION_READ_ONLY = true
+        private const val PASSIVE_LOCATION_DROP_NETWORK_PROVIDER = true
         private const val PASSIVE_LOCATION_HOOK = true
         private const val PASSIVE_LOCATION_ALWAYS_AS_GCJ02 = false
         private const val PASSIVE_LOCATION_FALLBACK_AS_WGS84_OR_GCJ02 = true
@@ -102,6 +103,8 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                             reentrantGuard.set(true)
                             synchronized(locker) {
                                 (hookParam.thisObject as? Location)?.let { location ->
+
+                                    val currMs = location.safeGetTime()
                                     var lastGcj02: CoordTransform.LatLng? = null
                                     var latestPures: Pair<CoordTransform.LatLng, CoordTransform.LatLng>? = null
                                     val provider = location.safeGetProvider()
@@ -185,11 +188,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
 
                                         // 2. Expired
                                         if (location.isExpired(lastLatLng)) {
-                                            if (lastLatLng == null) {
-                                                onRely("rely-expired", null)
-                                                return@afterHookedMethod
-
-                                            } else {
+                                            if (lastLatLng != null && !lastLatLng.isExpired(LOCATION_LAST_GCJ02_CACHING_MS)) {
                                                 lastLatLng.let {
                                                     if (!LOCATION_READ_ONLY) {
                                                         location.markAsGcj02(it)
@@ -201,12 +200,32 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                                 }
                                                 onDrop("drop-expired")
                                                 return@afterHookedMethod
+                                            } else {
+                                                onRely("rely-expired", null)
+                                                return@afterHookedMethod
                                             }
                                         }
+
                                         // 3. Has been transformed into wgs-84
                                         if (location.isGcj02Location()) {
                                             onRely("rely-gcj02", location.safeGetLatLng())
                                             return@afterHookedMethod
+                                        }
+
+                                        if (PASSIVE_LOCATION_DROP_NETWORK_PROVIDER && provider == LocationManager.NETWORK_PROVIDER) {
+                                            if (lastLatLng != null && !lastLatLng.isExpired(LOCATION_LAST_GCJ02_CACHING_MS)) {
+                                                lastLatLng.let {
+                                                    if (!LOCATION_READ_ONLY) {
+                                                        location.markAsGcj02(it)
+                                                    }
+                                                    when (method.name) {
+                                                        "getLatitude" -> hookParam.result = it.latitude
+                                                        "getLongitude" -> hookParam.result = it.longitude
+                                                    }
+                                                }
+                                                onDrop("drop-network")
+                                                return@afterHookedMethod
+                                            }
                                         }
 
                                         // 4. Check if transformable
@@ -226,14 +245,13 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                             return@afterHookedMethod
                                         }
 
-                                        val currMs = location.safeGetTime()
                                         val currLatLng = location.safeGetLatLng()
 
                                         // 5. Compare to latest pure location
                                         if (location.isReliableFused(lastLatLng)) {
                                             val latestPureLocation = getLatestPureLatLng().also { latestPures = it }
-                                            if (currLatLng == null || latestPureLocation == null || latestPureLocation.first.isExpired(LOCATION_LATEST_PURES_EXPIRED_MS, currMs)) {
-                                                logcatWarn { "\tcompareToPure: skip, currLatLng=$currLatLng, latestPureLocation=$latestPureLocation, expired=${latestPureLocation?.first?.isExpired(LOCATION_LATEST_PURES_EXPIRED_MS, currMs)}" }
+                                            if (currLatLng == null || latestPureLocation == null || latestPureLocation.first.isExpired(LOCATION_LATEST_PURES_EXPIRED_MS)) {
+                                                logcatWarn { "\tcompareToPure: skip, currLatLng=$currLatLng, latestPureLocation=$latestPureLocation, expired=${latestPureLocation?.first?.isExpired(LOCATION_LATEST_PURES_EXPIRED_MS)}" }
 
                                             } else {
                                                 // Compare speed & bearing
@@ -347,7 +365,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
 
                                         // 6. Compare to last gjc-02
                                         run {
-                                            if (lastLatLng != null && !lastLatLng.isExpired(LOCATION_LAST_GCJ02_EXPIRED_MS, currMs)) {
+                                            if (lastLatLng != null && !lastLatLng.isExpired(LOCATION_LAST_GCJ02_EXPIRED_MS)) {
                                                 currLatLng?.let { currLatLng ->
                                                     // Compare speed & bearing
                                                     run {
@@ -414,7 +432,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         // 7. Caching by last gjc-02
                                         run {
                                             // Try pass by the last gcj-02 location as cache
-                                            if (lastLatLng != null && !lastLatLng.isExpired(LOCATION_LAST_GCJ02_CACHING_MS, currMs)) {
+                                            if (lastLatLng != null && !lastLatLng.isExpired(LOCATION_LAST_GCJ02_CACHING_MS)) {
                                                 val mode = "drop-cache"
                                                 lastLatLng.let {
                                                     if (!LOCATION_READ_ONLY) {
@@ -1036,7 +1054,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         synchronized(locker) {
             logcatInfo { "getLatGcj02LatLng:" }
             val expiringMs = LOCATION_LAST_GCJ02_EXPIRED_MS
-            if (lastGcj02LatLng?.isExpired(expiringMs, System.currentTimeMillis()) == false) {
+            if (lastGcj02LatLng?.isExpired(expiringMs) == false) {
                 logcatInfo { "\tactive" }
                 return lastGcj02LatLng!!
 
@@ -1073,7 +1091,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         synchronized(locker) {
             logcatInfo { "getLatestPureLatLng:" }
             val expiringMs = LOCATION_LATEST_PURES_EXPIRED_MS
-            if (latestPureLocation?.first?.isExpired(expiringMs, System.currentTimeMillis()) == false) {
+            if (latestPureLocation?.first?.isExpired(expiringMs) == false) {
                 logcatInfo { "\tactive" }
                 return latestPureLocation!!
 
