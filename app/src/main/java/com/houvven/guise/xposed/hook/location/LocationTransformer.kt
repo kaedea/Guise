@@ -577,7 +577,7 @@ internal object CoordTransform {
             // Better way to handle hasTimes=false ?
             !hasTimes
                     || (timeMs < currMs && currMs - timeMs > thresholdMs)
-                    || (elapsedRealtimeNanos < currElapsedRealtimeNanos && currElapsedRealtimeNanos - elapsedRealtimeNanos > thresholdMs)
+                    || (elapsedRealtimeNanos < currElapsedRealtimeNanos && TimeUnit.NANOSECONDS.toMillis( currElapsedRealtimeNanos - elapsedRealtimeNanos) > thresholdMs)
 
         fun isNearTo(another: LatLng) = abs(toDistance(another)) <= LOCATION_MOVE_DISTANCE_TOLERANCE
 

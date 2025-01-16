@@ -3,6 +3,7 @@ package com.houvven.guise.xposed.hook.location
 import android.location.Location
 import android.location.LocationManager
 import android.os.Bundle
+import android.os.SystemClock
 import com.houvven.ktx_xposed.logger.logcat
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -276,9 +277,35 @@ internal fun Location.safeGetElapsedRealtimeNanos(): Long {
 }
 
 internal fun Location.formatTimes(): String {
-    val time = safeGetTime().takeIf { it > 0 }?.let { mDateFormat.format(it) } ?: "null"
-    val elapsedTime = safeGetElapsedRealtimeNanos().takeIf { it > 0 }?.let { formatMillis(TimeUnit.NANOSECONDS.toMillis(it)) } ?: "null"
-    return "($time, $elapsedTime)"
+    var time = "null"
+    var timeAge = "null"
+    safeGetTime().takeIf { it > 0 }?.let {
+        time = mDateFormat.format(it)
+        timeAge = "${System.currentTimeMillis() - it}ms"
+    }
+    var elapsedTime = "null"
+    var elapsedTimeAge = "null"
+    safeGetElapsedRealtimeNanos().takeIf { it > 0 }?.let {
+        elapsedTime = formatMillis(TimeUnit.NANOSECONDS.toMillis(it))
+        elapsedTimeAge = "${TimeUnit.NANOSECONDS.toMillis(SystemClock.elapsedRealtimeNanos() - it)}ms"
+    }
+    return "time=($time/$timeAge), elapsedTime=($elapsedTime,$elapsedTimeAge)"
+}
+
+internal fun CoordTransform.LatLng.formatTimes(): String {
+    var time = "null"
+    var timeAge = "null"
+    timeMs.takeIf { it > 0 }?.let {
+        time = mDateFormat.format(it)
+        timeAge = "${System.currentTimeMillis() - it}ms"
+    }
+    var elapsedTime = "null"
+    var elapsedTimeAge = "null"
+    elapsedRealtimeNanos.takeIf { it > 0 }?.let {
+        elapsedTime = formatMillis(TimeUnit.NANOSECONDS.toMillis(it))
+        elapsedTimeAge = "${TimeUnit.NANOSECONDS.toMillis(SystemClock.elapsedRealtimeNanos() - it)}ms"
+    }
+    return "time=($time/$timeAge), elapsedTime=($elapsedTime,$elapsedTimeAge)"
 }
 
 private fun formatMillis(millis: Long): String {

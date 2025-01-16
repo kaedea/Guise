@@ -953,26 +953,39 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
         // Expired when:
         // 1. time before last gcj-02
         // 2. age-to-now > LOCATION_EXPIRED_TIME_MS
-        val myTimeMs = safeGetTime()
-        if (last != null && last.hasTimes) {
-            if (myTimeMs > 0 && myTimeMs < last.timeMs) {
-                return true
+        logcatInfo { "isExpired:" }
+        val result = run {
+            val myTimeMs = safeGetTime()
+            if (last != null && last.hasTimes) {
+                if (myTimeMs > 0 && myTimeMs < last.timeMs) {
+                    logcatInfo { "\tolderThanLastOne: timeMs" }
+                    return@run true
+                }
+                val myElapsedRealtimeNanos = safeGetElapsedRealtimeNanos()
+                if (myElapsedRealtimeNanos > 0 && myElapsedRealtimeNanos < last.elapsedRealtimeNanos) {
+                    logcatInfo { "\tolderThanLastOne: elapsedRealtimeNanos" }
+                    return@run true
+                }
             }
+            val currMs = System.currentTimeMillis()
+            if (myTimeMs in 1 until currMs && (currMs - myTimeMs) > LOCATION_EXPIRED_TIME_MS) {
+                logcatInfo { "\ttooOld: timeMs" }
+                return@run true
+            }
+            val currElapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
             val myElapsedRealtimeNanos = safeGetElapsedRealtimeNanos()
-            if (myElapsedRealtimeNanos > 0 &&  myElapsedRealtimeNanos < last.elapsedRealtimeNanos) {
-                return true
+            if (myElapsedRealtimeNanos in 1 until currElapsedRealtimeNanos && TimeUnit.NANOSECONDS.toMillis((currElapsedRealtimeNanos - myElapsedRealtimeNanos)) > LOCATION_EXPIRED_TIME_MS) {
+                logcatInfo { "\ttooOld: elapsedRealtimeNanos" }
+                return@run true
             }
+            return@run false
         }
-        val currMs = System.currentTimeMillis()
-        if (myTimeMs in 1 until currMs && (currMs - myTimeMs) > LOCATION_EXPIRED_TIME_MS) {
-            return true
+        logcat {
+            info("\tcurrPureTimes: ${formatTimes()}")
+            info("\tlastLatLngTimes: ${last?.formatTimes()}")
+            info("isExpired: done, result=${result}")
         }
-        val currElapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
-        val myElapsedRealtimeNanos = safeGetElapsedRealtimeNanos()
-        if (myElapsedRealtimeNanos in 1 until currElapsedRealtimeNanos && (currElapsedRealtimeNanos - myElapsedRealtimeNanos) > LOCATION_EXPIRED_TIME_MS) {
-            return true
-        }
-        return false
+        return result
     }
 
     @Suppress("SameParameterValue")
