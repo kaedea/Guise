@@ -207,12 +207,27 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                             }
                                         }
 
-                                        // 3. Has been transformed into wgs-84
-                                        if (location.isGcj02Location()) {
-                                            onRely("rely-gcj02", location.safeGetLatLng())
-                                            return@afterHookedMethod
+                                        // 3. If wgs-84 or gcj-02
+                                        location.isWgs84OrGcj02Location(lastLatLng)?.let { isWgs84OrGcj02 ->
+                                            if (isWgs84OrGcj02) {
+                                                // pure wgs-84
+                                                val pair = location.wgs84ToGcj02(LOCATION_READ_ONLY)?.also { (_, gcj02LatLng) ->
+                                                    when (method.name) {
+                                                        "getLatitude" -> hookParam.result = gcj02LatLng.latitude
+                                                        "getLongitude" -> hookParam.result = gcj02LatLng.longitude
+                                                    }
+                                                }
+                                                onTransForm("trans-wgs84", pair?.second)
+                                                return@afterHookedMethod
+
+                                            } else {
+                                                // has been transformed into gcj-02
+                                                onRely("rely-gcj02", location.safeGetLatLng())
+                                                return@afterHookedMethod
+                                            }
                                         }
 
+                                        // 4. Drop network provider or not
                                         if (PASSIVE_LOCATION_DROP_NETWORK_PROVIDER && provider == LocationManager.NETWORK_PROVIDER) {
                                             if (lastLatLng != null && !lastLatLng.isExpired(LOCATION_LAST_GCJ02_CACHING_MS)) {
                                                 lastLatLng.let {
@@ -229,18 +244,6 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                             }
                                         }
 
-                                        // 4. Check if transformable
-                                        if (location.isTransformable(lastLatLng)) {
-                                            val pair = location.wgs84ToGcj02(LOCATION_READ_ONLY)?.also { (_, gcj02LatLng) ->
-                                                when (method.name) {
-                                                    "getLatitude" -> hookParam.result = gcj02LatLng.latitude
-                                                    "getLongitude" -> hookParam.result = gcj02LatLng.longitude
-                                                }
-                                            }
-                                            onTransForm("trans-transform", pair?.second)
-                                            return@afterHookedMethod
-                                        }
-
                                         if (PASSIVE_LOCATION_ALWAYS_AS_GCJ02) {
                                             onRely("rely-always", location.safeGetLatLng())
                                             return@afterHookedMethod
@@ -248,7 +251,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
 
                                         val currLatLng = location.safeGetLatLng()
 
-                                        // 5. Compare to latest pure location
+                                        // 5. Infer by comparing to latest pure location
                                         if (location.isReliableFused(lastLatLng)) {
                                             val latestPureLocation = getLatestPureLatLng().also { latestPures = it }
                                             if (currLatLng == null || latestPureLocation == null || latestPureLocation.first.isExpired(LOCATION_LATEST_PURES_EXPIRED_MS)) {
@@ -364,7 +367,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                             }
                                         }
 
-                                        // 6. Compare to last gjc-02
+                                        // 6. Infer by comparing to last gjc-02
                                         run {
                                             if (lastLatLng != null && !lastLatLng.isExpired(LOCATION_LAST_GCJ02_EXPIRED_MS)) {
                                                 currLatLng?.let { currLatLng ->
@@ -1003,16 +1006,16 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                     logcatInfo { "\tshouldTransform: false, out-of-bounds" }
                     return@also
                 }
-                if (location.isExpired(lastGcj02LatLng)) {
+                if (it.isExpired(lastGcj02LatLng)) {
                     logcatInfo { "\tisExpired: true" }
                     return@also
                 }
-                if (it.isGcj02Location()) {
-                    logcatInfo { "\tisGcj02Location: true" }
+                if (it.isWgs84OrGcj02Location(lastGcj02LatLng) == false) {
+                    logcatInfo { "\tisGcj02: true" }
                     return@also
                 }
-                if (!location.isTransformable()) {
-                    logcatInfo { "\tisTransformable: false" }
+                if (it.safeGetProvider() == LocationManager.FUSED_PROVIDER) {
+                    logcatInfo { "\tisFused: true" }
                     return@also
                 }
                 it.wgs84ToGcj02(LOCATION_READ_ONLY)?.let { (wgs84LatLng, gcj02LatLng) ->

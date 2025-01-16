@@ -36,6 +36,22 @@ internal fun Location.checkIfBounded(): Boolean {
     return false
 }
 
+private val mWgs84Holder by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    return@lazy object : LinkedHashSet<Int>() {
+        val limit = 200
+        override fun add(element: Int): Boolean {
+            val add = super.add(element)
+            if (add && size >= limit) {
+                iterator().apply {
+                    next()
+                    remove()
+                }
+            }
+            return add
+        }
+    }
+}
+
 private val mGcj02Holder by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     return@lazy object : LinkedHashSet<Int>() {
         val limit = 200
@@ -59,25 +75,6 @@ internal fun Location.myHashcode(): Int {
     return hashCode()
 }
 
-internal fun Location.isFakeLocation() = extras != null && extras!!.getBoolean("isFake", false)
-
-internal fun Location.isGcj02Location(): Boolean {
-    safeGetLatLng()?.let {
-        synchronized (mGcj02Holder) {
-            val hashcode = it.latLngHashcode()
-            val hit = mGcj02Holder.contains(hashcode)
-            logcatInfo { "\tgetLatLngHashcode: ${it.toSimpleString()}@hash=$hashcode, hit=${hit}" }
-            if (hit) {
-                return true
-            }
-        }
-    }
-    if (safeGetProvider()?.endsWith("@gcj02") == true) {
-        return true
-    }
-    return extras != null && extras!!.getBoolean("wgs2gcj", false)
-}
-
 internal fun Location.shouldTransform(): Boolean {
     val shouldRefreshing = mBoundingRef.second <= 0L || System.currentTimeMillis() - mBoundingRef.second >= BOUNDING_REFRESH_MS
     if (shouldRefreshing) {
@@ -90,34 +87,67 @@ internal fun Location.shouldTransform(): Boolean {
     return mBoundingRef.first
 }
 
-internal fun Location.isTransformable(lastLatLng: CoordTransform.LatLng? = null): Boolean {
+internal fun Location.isFakeLocation() = extras != null && extras!!.getBoolean("isFake", false)
+
+internal fun Location.isWgs84OrGcj02Location(lastLatLng: CoordTransform.LatLng? = null): Boolean? {
+    val isWgs84 = true
+    val isGcj02 = false
+    val unknown: Boolean? = null
+
     val provider = safeGetProvider()
     if (provider == LocationManager.GPS_PROVIDER) {
-        return true
+        return isWgs84
     }
-    if (provider == LocationManager.NETWORK_PROVIDER) {
-        // fromPassive=true means that this location is not retrieved by LocationListener.
-        // Tt could be produced by LocationListener of other process.
-        // In this case we consider this type of network location as not-transformable, which we should
-        // check if reliable or not.
-        // return !fromPassive
+    safeGetLatLng()?.let { currLatLng ->
+        val latLngHashcode = currLatLng.latLngHashcode()
+        synchronized (mGcj02Holder) {
+            val hit = mGcj02Holder.contains(latLngHashcode)
+            logcatInfo { "\tgetLatLngHashcode gcj02: ${currLatLng.toSimpleString()}@hash=$latLngHashcode, hit=${hit}" }
+            if (hit) {
+                return isGcj02
+            }
+        }
+        synchronized (mWgs84Holder) {
+            val hit = mWgs84Holder.contains(latLngHashcode)
+            logcatInfo { "\tgetLatLngHashcode wgs84: ${currLatLng.toSimpleString()}@hash=$latLngHashcode, hit=${hit}" }
+            if (hit) {
+                return isWgs84
+            }
+        }
+        if (provider == LocationManager.NETWORK_PROVIDER) {
+            // fromPassive=true means that this location is not retrieved by LocationListener.
+            // Tt could be produced by LocationListener of other process.
+            // In this case we consider this type of network location as not-transformable, which we should
+            // check if reliable or not.
+            // return unknown
 
-        // Check if near to last gcj-02
-        if (lastLatLng != null) {
-            safeGetLatLng()?.let {
-                if (it.isNearTo(lastLatLng)) {
-                    return false
+            if (lastLatLng != null) {
+                // Check if near to last gcj-02
+                if (currLatLng.isNearTo(lastLatLng)) {
+                    return isGcj02
+                }
+                // Check if near to last wgs-84
+                CoordTransform.gcj02ToWgs84(lastLatLng)?.let { lastWgs84 ->
+                    if (currLatLng.isNearTo(lastWgs84)) {
+                        return isWgs84
+                    }
                 }
             }
         }
-        return true
     }
+    if (safeGetProvider()?.endsWith("@gcj02") == true) {
+        return isGcj02
+    }
+    if (safeGetExtras()?.getBoolean("wgs2gcj", false) == true) {
+        return isGcj02
+    }
+
     // if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && provider == LocationManager.FUSED_PROVIDER) {
     //     // Fused Location (both Location & GmmLocation) might has been transformed
     //     // Should not be transformed again
-    //     return false
+    //     return isGcj02
     // }
-    return false
+    return unknown
 }
 
 internal fun Location.isReliableFused(lastLatLng: CoordTransform.LatLng? = null): Boolean {
@@ -231,15 +261,20 @@ internal fun Location.getLocationGcj02(): CoordTransform.LatLng? {
 
 internal fun Location.wgs84ToGcj02(readOnly: Boolean = true): Pair<CoordTransform.LatLng, CoordTransform.LatLng>? { // <wgs84, gcj02>
     logcatInfo { "wgs84ToGcj02@${myHashcode()}: $this" }
-    if (/*!isTransformable() || */isGcj02Location() || isFixUps()) {
-        exit { throw IllegalStateException("isTransformable=${isTransformable()}, isGcj02=${isGcj02Location()}, isFixUps=${isFixUps()}") }
+    if (/*!isTransformable() || */isWgs84OrGcj02Location() == false || isFixUps()) {
+        exit { throw IllegalStateException("isWgs84OrGcj02Location=${isWgs84OrGcj02Location()}, isFixUps=${isFixUps()}") }
     }
     val oldLatLng = safeGetLatLng()
     val newLatLng = oldLatLng?.let {
         return@let CoordTransform.wgs84ToGcj02(oldLatLng)?.also { newLatLng ->
+            synchronized(mWgs84Holder) {
+                val hashcode = oldLatLng.latLngHashcode()
+                logcatInfo { "\tputLatLngHashcode wgs84: ${oldLatLng.toSimpleString()}@hash=$hashcode" }
+                mWgs84Holder.add(hashcode)
+            }
             synchronized(mGcj02Holder) {
                 val hashcode = newLatLng.latLngHashcode()
-                logcatInfo { "\tputLatLngHashcode: ${newLatLng.toSimpleString()}@hash=$hashcode" }
+                logcatInfo { "\tputLatLngHashcode gcj02: ${newLatLng.toSimpleString()}@hash=$hashcode" }
                 mGcj02Holder.add(hashcode)
             }
             newLatLng.setTimes(safeGetTime(), safeGetElapsedRealtimeNanos())
