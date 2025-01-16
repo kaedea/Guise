@@ -561,6 +561,10 @@ internal object CoordTransform {
 
         fun toSimpleString() = "[$latitude,$longitude]"
 
+        fun isExpired(thresholdMs: Long, currMs: Long = System.currentTimeMillis()) =
+            // Better way to handle hasTimes=false ?
+            !hasTimes || (timeMs < currMs && currMs - timeMs > thresholdMs)
+
         fun toDistance(end: LatLng): Float {
             val floats = floatArrayOf(-1f)
             Location.distanceBetween(this.latitude, this.longitude, end.latitude, end.longitude, floats)
@@ -574,7 +578,7 @@ internal object CoordTransform {
             if (!this.hasTimes || !start.hasTimes) {
                 return null
             }
-            val sec = TimeUnit.MILLISECONDS.toSeconds(abs(this.timeMs - start.timeMs))
+            val sec = TimeUnit.NANOSECONDS.toSeconds(abs(this.elapsedRealtimeNanos - start.elapsedRealtimeNanos))
             if (sec <= 0) {
                 return null
             }

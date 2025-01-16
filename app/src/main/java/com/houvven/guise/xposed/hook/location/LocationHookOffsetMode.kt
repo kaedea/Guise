@@ -17,13 +17,14 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 
 class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBase(config) {
     companion object {
         private const val LOCATION_EXPIRED_TIME_MS = 5 * 60 * 1000L       // 5min
         private const val LOCATION_LAST_GCJ02_EXPIRED_MS = 2 * 60 * 1000L // 2min
-        private const val LOCATION_LAST_PURES_EXPIRED_MS = 2 * 60 * 1000L // 2min
+        private const val LOCATION_LATEST_PURES_EXPIRED_MS = 2 * 60 * 1000L // 2min
         private const val LOCATION_LAST_GCJ02_CACHING_MS = 1 * 60 * 1000L // 1min
 
         private const val LOCATION_READ_ONLY = true
@@ -218,8 +219,8 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         // 5. Compare to latest pure location
                                         if (location.isReliableFused(lastLatLng)) {
                                             val latestPureLocation = getLatestPureLatLng().also { latestPures = it }
-                                            if (currLatLng == null || latestPureLocation == null || abs(currMs - latestPureLocation.first.timeMs) > LOCATION_LAST_PURES_EXPIRED_MS) {
-                                                logcatWarn { "\tcompareToPure: skip, currLatLng=$currLatLng, latestPureLocation=$latestPureLocation" }
+                                            if (currLatLng == null || latestPureLocation == null || latestPureLocation.first.isExpired(LOCATION_LATEST_PURES_EXPIRED_MS, currMs)) {
+                                                logcatWarn { "\tcompareToPure: skip, currLatLng=$currLatLng, latestPureLocation=$latestPureLocation, expired=${latestPureLocation?.first?.isExpired(LOCATION_LATEST_PURES_EXPIRED_MS, currMs)}" }
 
                                             } else {
                                                 // Compare speed & bearing
@@ -333,7 +334,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
 
                                         // 6. Compare to last gjc-02
                                         run {
-                                            if (lastLatLng != null && abs(currMs - lastLatLng.timeMs) <= LOCATION_LAST_GCJ02_EXPIRED_MS) {
+                                            if (lastLatLng != null && !lastLatLng.isExpired(LOCATION_LAST_GCJ02_EXPIRED_MS, currMs)) {
                                                 currLatLng?.let { currLatLng ->
                                                     // Compare speed & bearing
                                                     run {
@@ -400,7 +401,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         // 7. Caching by last gjc-02
                                         run {
                                             // Try pass by the last gcj-02 location as cache
-                                            if (lastLatLng != null && abs(currMs - lastLatLng.timeMs) <= LOCATION_LAST_GCJ02_CACHING_MS) {
+                                            if (lastLatLng != null && !lastLatLng.isExpired(LOCATION_LAST_GCJ02_CACHING_MS, currMs)) {
                                                 val mode = "drop-cache"
                                                 lastLatLng.let {
                                                     if (!LOCATION_READ_ONLY) {
@@ -975,7 +976,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                         error("noteLatLngMoving: DRIFTING!! $tips")
                         if (distance > 200) {
                             if (System.currentTimeMillis() - initMs >= if (debuggable()) 30 * 1000L else 600 * 1000L) {
-                                toast { "DRIFTING!! ${distance}m ${speedMps}mPs $tips\n${source}" }
+                                toast { "$tips ${distance.roundToInt()} ${speedMps?.roundToInt()} ${source}" }
                             }
                         }
                     }
@@ -999,9 +1000,8 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
     private fun getLatGcj02LatLng(): CoordTransform.LatLng? {
         synchronized(locker) {
             logcatInfo { "getLatGcj02LatLng:" }
-            val expiringMs = LOCATION_EXPIRED_TIME_MS
-            val latestTimeMs = if (lastGcj02LatLng == null) 0L else lastGcj02LatLng!!.timeMs
-            if (System.currentTimeMillis() >= latestTimeMs && (System.currentTimeMillis() - latestTimeMs) <= expiringMs) {
+            val expiringMs = LOCATION_LAST_GCJ02_EXPIRED_MS
+            if (lastGcj02LatLng?.isExpired(expiringMs, System.currentTimeMillis()) == false) {
                 logcatInfo { "\tactive" }
                 return lastGcj02LatLng!!
 
@@ -1037,9 +1037,8 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
     private fun getLatestPureLatLng(): Pair<CoordTransform.LatLng, CoordTransform.LatLng>? {
         synchronized(locker) {
             logcatInfo { "getLatestPureLatLng:" }
-            val expiringMs = LOCATION_EXPIRED_TIME_MS
-            val latestTimeMs = if (latestPureLocation == null) 0L else latestPureLocation!!.first.timeMs
-            if (System.currentTimeMillis() >= latestTimeMs && (System.currentTimeMillis() - latestTimeMs) <= expiringMs) {
+            val expiringMs = LOCATION_LATEST_PURES_EXPIRED_MS
+            if (latestPureLocation?.first?.isExpired(expiringMs, System.currentTimeMillis()) == false) {
                 logcatInfo { "\tactive" }
                 return latestPureLocation!!
 
