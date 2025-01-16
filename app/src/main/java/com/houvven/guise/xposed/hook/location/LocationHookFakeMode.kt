@@ -7,6 +7,7 @@ import android.os.UserHandle
 import com.houvven.guise.xposed.config.ModuleConfig
 import com.houvven.ktx_xposed.hook.*
 import com.houvven.ktx_xposed.logger.logcatInfo
+import de.robv.android.xposed.callbacks.XC_LoadPackage
 
 class LocationHookFakeMode(override val config: ModuleConfig) : LocationHookBase(config) {
     private var fakeLatitude = config.latitude
@@ -20,7 +21,7 @@ class LocationHookFakeMode(override val config: ModuleConfig) : LocationHookBase
     private val carrierFrequencies = cn0s.clone()
     private val basebandCn0DbHzs = cn0s.clone()
 
-    override fun start() {
+    override fun start(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (config.randomOffset) {
             fakeLatitude += (Math.random() - 0.5) * 0.0001
             fakeLongitude += (Math.random() - 0.5) * 0.0001

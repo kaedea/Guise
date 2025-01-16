@@ -7,6 +7,7 @@ import com.houvven.ktx_xposed.hook.*
 import com.houvven.ktx_xposed.logger.logcat
 import com.houvven.ktx_xposed.logger.logcatWarn
 import de.robv.android.xposed.callbacks.XC_LoadPackage
+import java.util.*
 
 
 @Suppress("DEPRECATION")
@@ -21,6 +22,7 @@ class LocationHook : LoadPackageHandler {
     private val isFixGoogleMapDriftMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { config.fixGoogleMapDrift }
     private val fakeMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { LocationHookFakeMode(config) }
     private val offsetMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { LocationHookOffsetMode(config) }
+    private val gmsOffsetMode by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { GmsLocationHookOffsetMode(config) }
 
     override fun onHook() {
         error("Deprecated")
@@ -51,18 +53,19 @@ class LocationHook : LoadPackageHandler {
                     logcatWarn { "${TAG}#disabled" }
                 } else {
                     // Enabled
-                    init()
+                    init(lpparam)
                     hasInit = true
                 }
             }
         }
     }
 
-    private fun init() {
+    private fun init(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (isFakeLocationMode) {
-            fakeMode.start()
+            fakeMode.start(lpparam)
         } else if (isFixGoogleMapDriftMode) {
-            offsetMode.start()
+            offsetMode.start(lpparam)
+            gmsOffsetMode.start(lpparam)
         }
     }
 }

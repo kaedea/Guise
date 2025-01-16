@@ -11,6 +11,7 @@ import android.telephony.TelephonyManager.INCLUDE_LOCATION_DATA_NONE
 import android.telephony.gsm.GsmCellLocation
 import com.houvven.guise.xposed.config.ModuleConfig
 import com.houvven.ktx_xposed.hook.*
+import de.robv.android.xposed.callbacks.XC_LoadPackage
 
 
 internal const val HOOK_LOCATION_LISTENER = true
@@ -18,7 +19,7 @@ internal const val HOOK_LOCATION_LISTENER = true
 @Suppress("DEPRECATION")
 abstract class LocationHookBase(open val config: ModuleConfig) {
 
-    abstract fun start()
+    abstract fun start(lpparam: XC_LoadPackage.LoadPackageParam)
 
     protected fun makeTelLocationFail() {
         TelephonyManager::class.java.run {

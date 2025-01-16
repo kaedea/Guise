@@ -14,6 +14,7 @@ import com.houvven.ktx_xposed.logger.*
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
+import de.robv.android.xposed.callbacks.XC_LoadPackage
 import java.util.*
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
@@ -55,7 +56,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
 
     private val listenerHolder: MutableMap<Int, LocationListener> by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { hashMapOf() }
 
-    override fun start() {
+    override fun start(lpparam: XC_LoadPackage.LoadPackageParam) {
         logcatInfo { "#start" }
 
         // Location APIs
