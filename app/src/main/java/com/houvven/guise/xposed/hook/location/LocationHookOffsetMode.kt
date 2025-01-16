@@ -6,6 +6,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import com.houvven.guise.xposed.config.ModuleConfig
 import com.houvven.guise.xposed.hook.location.CoordTransform.LatLng.Companion.relative360BearingDelta
 import com.houvven.ktx_xposed.hook.*
@@ -13,7 +14,6 @@ import com.houvven.ktx_xposed.logger.*
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
-import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
@@ -37,7 +37,6 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
 
     private val initMs = System.currentTimeMillis()
     private val locker by lazy { this }
-    private val simpleDateFormat by lazy { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
 
     // Last Location(gcj02)
     private var lastGcj02LatLng: CoordTransform.LatLng? = null
@@ -115,7 +114,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                         Throwable().stackTrace.forEach {
                                             info("\t\t$it")
                                         }
-                                        info("\ttime: ${simpleDateFormat.format(location.safeGetTime())}, expired=${location.isExpired(lastGcj02)}")
+                                        info("\ttimes: ${location.formatTimes()}, expired=${location.isExpired(lastGcj02)}")
                                         info("\tmotion: speed=${location.safeHasSpeed()}(${location.safeGetSpeed()}), bearing=${location.safeHasBearing()}(${location.safeGetBearing()})")
                                         info("\tprovider: $provider")
                                         info("\t$location")
@@ -186,8 +185,23 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
 
                                         // 2. Expired
                                         if (location.isExpired(lastLatLng)) {
-                                            onRely("rely-expired", null)
-                                            return@afterHookedMethod
+                                            if (lastLatLng == null) {
+                                                onRely("rely-expired", null)
+                                                return@afterHookedMethod
+
+                                            } else {
+                                                lastLatLng.let {
+                                                    if (!LOCATION_READ_ONLY) {
+                                                        location.markAsGcj02(it)
+                                                    }
+                                                    when (method.name) {
+                                                        "getLatitude" -> hookParam.result = it.latitude
+                                                        "getLongitude" -> hookParam.result = it.longitude
+                                                    }
+                                                }
+                                                onDrop("drop-expired")
+                                                return@afterHookedMethod
+                                            }
                                         }
                                         // 3. Has been transformed into wgs-84
                                         if (location.isGcj02Location()) {
@@ -513,19 +527,17 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                                 Throwable().stackTrace.forEach {
                                     info("\t\t$it")
                                 }
-                                info("\ttime: ${simpleDateFormat.format(location.safeGetTime())}, expired=${location.isExpired(lastGcj02LatLng)}")
+                                info("\ttimes: ${location.formatTimes()}, expired=${location.isExpired(lastGcj02LatLng)}")
                                 info("\t$location")
                                 info("\tprovider: ${location.safeGetProvider()}")
                                 info("<<<<<<<<<<<<<<<<<<")
                             }
-                            if (!location.isExpired(lastGcj02LatLng)) {
-                                hookParam.result = modifyLocationToGcj02(
-                                    location,
-                                    "hookGetLastLocation-${method.name}",
-                                    keepAsLastLatLng = true,
-                                    keepAsLatestPureLocation = false
-                                )
-                            }
+                            hookParam.result = modifyLocationToGcj02(
+                                location,
+                                "hookGetLastLocation-${method.name}",
+                                keepAsLastLatLng = true,
+                                keepAsLatestPureLocation = false
+                            )
                         }
                     }
                 }
@@ -700,18 +712,21 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                             // Hook and modify LocationListener#onLocationChanged(Location)
                             beforeHookedMethod(target, *paramsTypes) { hookParam ->
                                 synchronized(locker) {
-                                    logcat {
-                                        info(">>>>>>>>>>>>>>>>>>")
-                                        info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
-                                        info("\tfrom:")
-                                        Throwable().stackTrace.forEach {
-                                            info("\t\t$it")
+                                    val location = hookParam.args[0] as? Location
+                                    if (location != null) {
+                                        logcat {
+                                            info(">>>>>>>>>>>>>>>>>>")
+                                            info("onMethodInvokeHook ${hookParam.thisObject.javaClass.simpleName}#${hookParam.method.name}, args=${Arrays.toString(hookParam.args)}, result=${hookParam.result}")
+                                            info("\tfrom:")
+                                            Throwable().stackTrace.forEach {
+                                                info("\t\t$it")
+                                            }
+                                            info("\ttimes: ${location.formatTimes()}, expired=${location.isExpired(lastGcj02LatLng)}")
+                                            info("\t$location")
+                                            info("\tprovider: ${location.safeGetProvider()}")
+                                            info("<<<<<<<<<<<<<<<<<<")
                                         }
-                                        info("<<<<<<<<<<<<<<<<<<")
-                                    }
-                                    val originalLocation = hookParam.args[0] as? Location
-                                    if (originalLocation != null) {
-                                        hookParam.args[0] = modifyLocationToGcj02(originalLocation, "hookLocationListener-${method.name}")
+                                        hookParam.args[0] = modifyLocationToGcj02(location, "hookLocationListener-${method.name}")
                                     }
                                 }
                             }
@@ -917,12 +932,29 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
     }
 
     private fun Location.isExpired(last: CoordTransform.LatLng?): Boolean {
-        val timeMs = this.safeGetTime()
+        // Expired when:
+        // 1. time before last gcj-02
+        // 2. age-to-now > LOCATION_EXPIRED_TIME_MS
+        val myTimeMs = safeGetTime()
         if (last != null && last.hasTimes) {
-            return timeMs < last.timeMs
+            if (myTimeMs > 0 && myTimeMs < last.timeMs) {
+                return true
+            }
+            val myElapsedRealtimeNanos = safeGetElapsedRealtimeNanos()
+            if (myElapsedRealtimeNanos > 0 &&  myElapsedRealtimeNanos < last.elapsedRealtimeNanos) {
+                return true
+            }
         }
         val currMs = System.currentTimeMillis()
-        return timeMs < currMs && (currMs - timeMs) > LOCATION_EXPIRED_TIME_MS
+        if (myTimeMs in 1 until currMs && (currMs - myTimeMs) > LOCATION_EXPIRED_TIME_MS) {
+            return true
+        }
+        val currElapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+        val myElapsedRealtimeNanos = safeGetElapsedRealtimeNanos()
+        if (myElapsedRealtimeNanos in 1 until currElapsedRealtimeNanos && (currElapsedRealtimeNanos - myElapsedRealtimeNanos) > LOCATION_EXPIRED_TIME_MS) {
+            return true
+        }
+        return false
     }
 
     @Suppress("SameParameterValue")
@@ -937,6 +969,10 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
             return location.also {
                 if (!it.shouldTransform()) {
                     logcatInfo { "\tshouldTransform: false, out-of-bounds" }
+                    return@also
+                }
+                if (location.isExpired(lastGcj02LatLng)) {
+                    logcatInfo { "\tisExpired: true" }
                     return@also
                 }
                 if (it.isGcj02Location()) {
@@ -1128,7 +1164,7 @@ class LocationHookOffsetMode(override val config: ModuleConfig) : LocationHookBa
                     Throwable().stackTrace.forEach {
                         info("\t\t$it")
                     }
-                    info("\ttime: ${simpleDateFormat.format(location.safeGetTime())}, expired=${location.isExpired(lastGcj02LatLng)}")
+                    info("\ttimes: ${location.formatTimes()}, expired=${location.isExpired(lastGcj02LatLng)}")
                     info("\t$location")
                     info("\tprovider: ${location.safeGetProvider()}")
                     info("<<<<<<<<<<<<<<<<<<")

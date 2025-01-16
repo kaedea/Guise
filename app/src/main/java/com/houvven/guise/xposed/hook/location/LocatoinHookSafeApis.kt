@@ -6,11 +6,17 @@ import android.os.Bundle
 import com.houvven.ktx_xposed.logger.logcat
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
+import java.text.SimpleDateFormat
+import java.util.*
+import java.util.concurrent.TimeUnit
 
 /**
  * @author Kaede
  * @since  2025-01-13
  */
+
+private val mDateFormat by lazy { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+
 
 private val getLatitudeMethod by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
     try {
@@ -267,6 +273,33 @@ internal fun Location.safeGetElapsedRealtimeNanos(): Long {
         this,
         null
     ) as? Long ?: 0L
+}
+
+internal fun Location.formatTimes(): String {
+    val time = safeGetTime().takeIf { it > 0 }?.let { mDateFormat.format(it) } ?: "null"
+    val elapsedTime = safeGetElapsedRealtimeNanos().takeIf { it > 0 }?.let { formatMillis(TimeUnit.NANOSECONDS.toMillis(it)) } ?: "null"
+    return "($time, $elapsedTime)"
+}
+
+private fun formatMillis(millis: Long): String {
+    if (millis < 0) {
+        return "-ms"
+    }
+
+    val ms = millis % 1000
+    var remainingSeconds = millis / 1000
+    val seconds = remainingSeconds % 60
+    remainingSeconds /= 60
+    val minutes = remainingSeconds % 60
+    remainingSeconds /= 60
+    val hours = remainingSeconds
+
+    return buildString {
+        if (hours > 0) append("${hours}h")
+        if (minutes > 0) append("${minutes}m")
+        if (seconds > 0) append("${seconds}s")
+        append("${ms}ms")
+    }
 }
 
 internal fun Location.safeHasSpeed(): Boolean {
