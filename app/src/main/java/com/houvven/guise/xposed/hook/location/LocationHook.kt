@@ -65,7 +65,7 @@ class LocationHook : LoadPackageHandler {
             fakeMode.start(lpparam)
         } else if (isFixGoogleMapDriftMode) {
             offsetMode.start(lpparam)
-            gmsOffsetMode.start(lpparam)
+            // gmsOffsetMode.start(lpparam)
         }
     }
 }
